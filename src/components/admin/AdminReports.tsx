@@ -16,18 +16,17 @@ interface Stats {
   noShowAppointments: number;
   suspendedUsers: number;
   monthlyData: { month: string; count: number }[];
-  procedureData: { name: string; value: number }[];
+  specialtyData: { name: string; value: number }[];
 }
 
 interface AppointmentReport {
   id: string;
   userName: string;
   userEmail: string;
-  userDepartment: string;
   userStatus: string;
   date: string;
   time: string;
-  procedure: string;
+  specialty: string;
   status: string;
   professionalName: string;
 }
@@ -43,7 +42,7 @@ export default function AdminReports() {
     noShowAppointments: 0,
     suspendedUsers: 0,
     monthlyData: [],
-    procedureData: []
+    specialtyData: []
   });
   const [appointmentReports, setAppointmentReports] = useState<AppointmentReport[]>([]);
 
@@ -55,12 +54,18 @@ export default function AdminReports() {
   const fetchStats = async () => {
     const { data: appointments } = await supabase
       .from('appointments')
-      .select('status, procedure, date');
+      .select('status, specialty_id, appointment_date');
 
     const { data: users } = await supabase
       .from('profiles')
       .select('suspended_until')
       .not('suspended_until', 'is', null);
+
+    const { data: specialties } = await supabase
+      .from('specialties')
+      .select('id, name');
+
+    const specialtiesMap = new Map(specialties?.map(s => [s.id, s.name]) || []);
 
     if (appointments) {
       const total = appointments.length;
@@ -70,18 +75,19 @@ export default function AdminReports() {
 
       const monthlyMap = new Map<string, number>();
       appointments.forEach(a => {
-        const month = format(parseISO(a.date), 'MMM/yy', { locale: ptBR });
+        const month = format(parseISO(a.appointment_date), 'MMM/yy', { locale: ptBR });
         monthlyMap.set(month, (monthlyMap.get(month) || 0) + 1);
       });
       const monthlyData = Array.from(monthlyMap.entries())
         .map(([month, count]) => ({ month, count }))
         .slice(-6);
 
-      const procedureMap = new Map<string, number>();
+      const specialtyMap = new Map<string, number>();
       appointments.forEach(a => {
-        procedureMap.set(a.procedure, (procedureMap.get(a.procedure) || 0) + 1);
+        const specialtyName = specialtiesMap.get(a.specialty_id) || 'Desconhecido';
+        specialtyMap.set(specialtyName, (specialtyMap.get(specialtyName) || 0) + 1);
       });
-      const procedureData = Array.from(procedureMap.entries())
+      const specialtyData = Array.from(specialtyMap.entries())
         .map(([name, value]) => ({ name, value }));
 
       const suspendedUsers = users?.filter(u => 
@@ -95,7 +101,7 @@ export default function AdminReports() {
         noShowAppointments: noShow,
         suspendedUsers,
         monthlyData,
-        procedureData
+        specialtyData
       });
     }
 
@@ -107,36 +113,41 @@ export default function AdminReports() {
       .from('appointments')
       .select(`
         id,
-        date,
-        time,
-        procedure,
+        appointment_date,
+        appointment_time,
+        specialty_id,
         status,
         user_id,
         professional_id
       `)
-      .order('date', { ascending: false });
+      .order('appointment_date', { ascending: false });
 
     if (!appointments) return;
 
     const userIds = [...new Set(appointments.map(a => a.user_id))];
-    const professionalIds = [...new Set(appointments.map(a => a.professional_id))];
+    const professionalIds = [...new Set(appointments.map(a => a.professional_id).filter(Boolean))];
 
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, name, email, department, suspended_until')
-      .in('id', userIds);
+      .select('user_id, name, email, suspended_until')
+      .in('user_id', userIds);
 
     const { data: professionals } = await supabase
       .from('professionals')
       .select('id, name')
       .in('id', professionalIds);
 
-    const profilesMap = new Map(profiles?.map(p => [p.id, p]) || []);
+    const { data: specialties } = await supabase
+      .from('specialties')
+      .select('id, name');
+
+    const profilesMap = new Map(profiles?.map(p => [p.user_id, p]) || []);
     const professionalsMap = new Map(professionals?.map(p => [p.id, p]) || []);
+    const specialtiesMap = new Map(specialties?.map(s => [s.id, s.name]) || []);
 
     const reports: AppointmentReport[] = appointments.map(a => {
       const profile = profilesMap.get(a.user_id);
-      const professional = professionalsMap.get(a.professional_id);
+      const professional = a.professional_id ? professionalsMap.get(a.professional_id) : null;
       
       let userStatus = 'Ativo';
       if (profile?.suspended_until && new Date(profile.suspended_until) > new Date()) {
@@ -147,11 +158,10 @@ export default function AdminReports() {
         id: a.id,
         userName: profile?.name || 'N/A',
         userEmail: profile?.email || 'N/A',
-        userDepartment: profile?.department || 'N/A',
         userStatus,
-        date: a.date,
-        time: a.time,
-        procedure: a.procedure,
+        date: a.appointment_date,
+        time: a.appointment_time,
+        specialty: specialtiesMap.get(a.specialty_id) || 'N/A',
         status: a.status,
         professionalName: professional?.name || 'N/A'
       };
@@ -174,11 +184,10 @@ export default function AdminReports() {
     const data = appointmentReports.map(r => ({
       'Nome do Usuário': r.userName,
       'Email': r.userEmail,
-      'Departamento': r.userDepartment,
       'Status do Usuário': r.userStatus,
       'Data': format(parseISO(r.date), 'dd/MM/yyyy'),
       'Horário': r.time.slice(0, 5),
-      'Especialidade/Procedimento': r.procedure,
+      'Especialidade': r.specialty,
       'Profissional': r.professionalName,
       'Status do Agendamento': getStatusLabel(r.status)
     }));
@@ -187,7 +196,6 @@ export default function AdminReports() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Relatório');
 
-    // Auto-width columns
     const maxWidths: number[] = [];
     data.forEach(row => {
       Object.values(row).forEach((val, i) => {
@@ -311,14 +319,14 @@ export default function AdminReports() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Distribuição por Procedimento</CardTitle>
+            <CardTitle>Distribuição por Especialidade</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={stats.procedureData}
+                    data={stats.specialtyData}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
@@ -327,7 +335,7 @@ export default function AdminReports() {
                     dataKey="value"
                     label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                   >
-                    {stats.procedureData.map((entry, index) => (
+                    {stats.specialtyData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
@@ -360,7 +368,6 @@ export default function AdminReports() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
-                  <TableHead>Departamento</TableHead>
                   <TableHead>Status Usuário</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Horário</TableHead>
@@ -373,7 +380,6 @@ export default function AdminReports() {
                 {appointmentReports.slice(0, 50).map((report) => (
                   <TableRow key={report.id}>
                     <TableCell className="font-medium">{report.userName}</TableCell>
-                    <TableCell className="text-muted-foreground">{report.userDepartment}</TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         report.userStatus === 'Suspenso' 
@@ -385,7 +391,7 @@ export default function AdminReports() {
                     </TableCell>
                     <TableCell>{format(parseISO(report.date), 'dd/MM/yyyy')}</TableCell>
                     <TableCell>{report.time.slice(0, 5)}</TableCell>
-                    <TableCell>{report.procedure}</TableCell>
+                    <TableCell>{report.specialty}</TableCell>
                     <TableCell>{report.professionalName}</TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs ${

@@ -20,81 +20,64 @@ export type Database = {
           admin_id: string | null
           created_at: string
           details: Json | null
-          entity_id: string | null
-          entity_type: string
           id: string
+          target_id: string | null
+          target_type: string | null
         }
         Insert: {
           action: string
           admin_id?: string | null
           created_at?: string
           details?: Json | null
-          entity_id?: string | null
-          entity_type: string
           id?: string
+          target_id?: string | null
+          target_type?: string | null
         }
         Update: {
           action?: string
           admin_id?: string | null
           created_at?: string
           details?: Json | null
-          entity_id?: string | null
-          entity_type?: string
           id?: string
+          target_id?: string | null
+          target_type?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "admin_logs_admin_id_fkey"
-            columns: ["admin_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       appointments: {
         Row: {
-          cancel_reason: string | null
-          cancelled_at: string | null
-          completed_at: string | null
+          appointment_date: string
+          appointment_time: string
           created_at: string
-          date: string
           id: string
-          procedure: string
-          professional_id: string
-          reminder_sent: boolean
+          notes: string | null
+          professional_id: string | null
+          specialty_id: string | null
           status: string
-          time: string
           updated_at: string
           user_id: string
         }
         Insert: {
-          cancel_reason?: string | null
-          cancelled_at?: string | null
-          completed_at?: string | null
+          appointment_date: string
+          appointment_time: string
           created_at?: string
-          date: string
           id?: string
-          procedure: string
-          professional_id: string
-          reminder_sent?: boolean
+          notes?: string | null
+          professional_id?: string | null
+          specialty_id?: string | null
           status?: string
-          time: string
           updated_at?: string
           user_id: string
         }
         Update: {
-          cancel_reason?: string | null
-          cancelled_at?: string | null
-          completed_at?: string | null
+          appointment_date?: string
+          appointment_time?: string
           created_at?: string
-          date?: string
           id?: string
-          procedure?: string
-          professional_id?: string
-          reminder_sent?: boolean
+          notes?: string | null
+          professional_id?: string | null
+          specialty_id?: string | null
           status?: string
-          time?: string
           updated_at?: string
           user_id?: string
         }
@@ -107,35 +90,35 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "appointments_user_id_fkey"
-            columns: ["user_id"]
+            foreignKeyName: "appointments_specialty_id_fkey"
+            columns: ["specialty_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "specialties"
             referencedColumns: ["id"]
           },
         ]
       }
       available_days: {
         Row: {
-          created_at: string
-          date: string
+          day_of_week: number
+          end_time: string
           id: string
           professional_id: string
-          updated_at: string
+          start_time: string
         }
         Insert: {
-          created_at?: string
-          date: string
+          day_of_week: number
+          end_time: string
           id?: string
           professional_id: string
-          updated_at?: string
+          start_time: string
         }
         Update: {
-          created_at?: string
-          date?: string
+          day_of_week?: number
+          end_time?: string
           id?: string
           professional_id?: string
-          updated_at?: string
+          start_time?: string
         }
         Relationships: [
           {
@@ -149,28 +132,28 @@ export type Database = {
       }
       blocked_days: {
         Row: {
+          blocked_date: string
           created_at: string
-          date: string
           id: string
           professional_id: string | null
           reason: string | null
-          updated_at: string
+          specialty_id: string | null
         }
         Insert: {
+          blocked_date: string
           created_at?: string
-          date: string
           id?: string
           professional_id?: string | null
           reason?: string | null
-          updated_at?: string
+          specialty_id?: string | null
         }
         Update: {
+          blocked_date?: string
           created_at?: string
-          date?: string
           id?: string
           professional_id?: string | null
           reason?: string | null
-          updated_at?: string
+          specialty_id?: string | null
         }
         Relationships: [
           {
@@ -180,74 +163,135 @@ export type Database = {
             referencedRelation: "professionals"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "blocked_days_specialty_id_fkey"
+            columns: ["specialty_id"]
+            isOneToOne: false
+            referencedRelation: "specialties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      professional_specialties: {
+        Row: {
+          id: string
+          professional_id: string
+          specialty_id: string
+        }
+        Insert: {
+          id?: string
+          professional_id: string
+          specialty_id: string
+        }
+        Update: {
+          id?: string
+          professional_id?: string
+          specialty_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_specialties_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "professional_specialties_specialty_id_fkey"
+            columns: ["specialty_id"]
+            isOneToOne: false
+            referencedRelation: "specialties"
+            referencedColumns: ["id"]
+          },
         ]
       }
       professionals: {
         Row: {
+          active: boolean
           created_at: string
-          end_time: string
+          email: string | null
           id: string
           name: string
-          specialty: string
-          start_time: string
-          updated_at: string
-          work_days: number[]
+          phone: string | null
         }
         Insert: {
+          active?: boolean
           created_at?: string
-          end_time?: string
+          email?: string | null
           id?: string
           name: string
-          specialty: string
-          start_time?: string
-          updated_at?: string
-          work_days?: number[]
+          phone?: string | null
         }
         Update: {
+          active?: boolean
           created_at?: string
-          end_time?: string
+          email?: string | null
           id?: string
           name?: string
-          specialty?: string
-          start_time?: string
-          updated_at?: string
-          work_days?: number[]
+          phone?: string | null
         }
         Relationships: []
       }
       profiles: {
         Row: {
+          cpf: string | null
           created_at: string
-          department: string | null
           email: string
           id: string
-          last_appointment_date: string | null
           name: string
-          role: Database["public"]["Enums"]["app_role"]
+          phone: string | null
           suspended_until: string | null
           updated_at: string
+          user_id: string
         }
         Insert: {
+          cpf?: string | null
           created_at?: string
-          department?: string | null
           email: string
-          id: string
-          last_appointment_date?: string | null
+          id?: string
           name: string
-          role?: Database["public"]["Enums"]["app_role"]
+          phone?: string | null
           suspended_until?: string | null
           updated_at?: string
+          user_id: string
         }
         Update: {
+          cpf?: string | null
           created_at?: string
-          department?: string | null
           email?: string
           id?: string
-          last_appointment_date?: string | null
           name?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          phone?: string | null
           suspended_until?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      specialties: {
+        Row: {
+          active: boolean
+          created_at: string
+          description: string | null
+          duration_minutes: number
+          id: string
+          name: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          name: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          name?: string
         }
         Relationships: []
       }
@@ -259,36 +303,12 @@ export type Database = {
         }
         Insert: {
           id?: string
-          role: Database["public"]["Enums"]["app_role"]
+          role?: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
         Update: {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
-        }
-        Relationships: []
-      }
-      user_specialty_blocks: {
-        Row: {
-          blocked_until: string
-          created_at: string
-          id: string
-          specialty: string
-          user_id: string
-        }
-        Insert: {
-          blocked_until: string
-          created_at?: string
-          id?: string
-          specialty: string
-          user_id: string
-        }
-        Update: {
-          blocked_until?: string
-          created_at?: string
-          id?: string
-          specialty?: string
           user_id?: string
         }
         Relationships: []
@@ -311,7 +331,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "user" | "admin"
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -439,7 +459,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["user", "admin"],
+      app_role: ["admin", "user"],
     },
   },
 } as const

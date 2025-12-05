@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,21 +15,19 @@ interface Appointment {
   id: string;
   user_id: string;
   professional_id: string;
-  procedure: string;
-  date: string;
-  time: string;
+  specialty_id: string;
+  appointment_date: string;
+  appointment_time: string;
   status: string;
-  cancel_reason: string | null;
-  profiles?: { name: string; email: string };
-  professionals?: { name: string; specialty: string };
+  notes: string | null;
   user_name?: string;
   user_email?: string;
   professional_name?: string;
-  specialty?: string;
+  specialty_name?: string;
 }
 
 interface User {
-  id: string;
+  user_id: string;
   name: string;
   email: string;
 }
@@ -37,7 +35,11 @@ interface User {
 interface Professional {
   id: string;
   name: string;
-  specialty: string;
+}
+
+interface Specialty {
+  id: string;
+  name: string;
 }
 
 const timeSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
@@ -48,6 +50,7 @@ export default function AdminAppointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showDialog, setShowDialog] = useState(false);
@@ -55,6 +58,7 @@ export default function AdminAppointments() {
   const [formData, setFormData] = useState({
     user_id: '',
     professional_id: '',
+    specialty_id: '',
     date: '',
     time: '09:00'
   });
@@ -65,14 +69,29 @@ export default function AdminAppointments() {
 
   const fetchData = async () => {
     try {
-      const [appointmentsData, usersData, professionalsData] = await Promise.all([
-        api.getAllAppointments(),
-        api.getProfiles(),
-        api.getProfessionals()
+      const [appointmentsRes, profilesRes, professionalsRes, specialtiesRes] = await Promise.all([
+        supabase.from('appointments').select('*').order('appointment_date', { ascending: false }),
+        supabase.from('profiles').select('user_id, name, email'),
+        supabase.from('professionals').select('id, name'),
+        supabase.from('specialties').select('id, name')
       ]);
-      setAppointments(appointmentsData);
-      setUsers(usersData.filter((u: any) => u.role === 'user'));
-      setProfessionals(professionalsData);
+
+      const profilesMap = new Map(profilesRes.data?.map(p => [p.user_id, p]) || []);
+      const professionalsMap = new Map(professionalsRes.data?.map(p => [p.id, p]) || []);
+      const specialtiesMap = new Map(specialtiesRes.data?.map(s => [s.id, s.name]) || []);
+
+      const enrichedAppointments = (appointmentsRes.data || []).map(apt => ({
+        ...apt,
+        user_name: profilesMap.get(apt.user_id)?.name || 'N/A',
+        user_email: profilesMap.get(apt.user_id)?.email || 'N/A',
+        professional_name: professionalsMap.get(apt.professional_id)?.name || 'N/A',
+        specialty_name: specialtiesMap.get(apt.specialty_id) || 'N/A'
+      }));
+
+      setAppointments(enrichedAppointments);
+      setUsers(profilesRes.data || []);
+      setProfessionals(professionalsRes.data || []);
+      setSpecialties(specialtiesRes.data || []);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -81,7 +100,7 @@ export default function AdminAppointments() {
 
   const handleNew = () => {
     setEditingId(null);
-    setFormData({ user_id: '', professional_id: '', date: '', time: '09:00' });
+    setFormData({ user_id: '', professional_id: '', specialty_id: '', date: '', time: '09:00' });
     setShowDialog(true);
   };
 
@@ -90,80 +109,84 @@ export default function AdminAppointments() {
     setFormData({
       user_id: apt.user_id,
       professional_id: apt.professional_id,
-      date: apt.date,
-      time: apt.time.substring(0, 5)
+      specialty_id: apt.specialty_id,
+      date: apt.appointment_date,
+      time: apt.appointment_time.substring(0, 5)
     });
     setShowDialog(true);
   };
 
   const handleSave = async () => {
-    if (!formData.user_id || !formData.professional_id || !formData.date) {
+    if (!formData.user_id || !formData.professional_id || !formData.specialty_id || !formData.date) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Preencha todos os campos.' });
       return;
     }
 
-    const prof = professionals.find(p => p.id === formData.professional_id);
-    
     try {
       if (editingId) {
-        // Update não implementado diretamente - usar delete + create ou endpoint específico
+        const { error } = await supabase
+          .from('appointments')
+          .update({
+            professional_id: formData.professional_id,
+            specialty_id: formData.specialty_id,
+            appointment_date: formData.date,
+            appointment_time: formData.time + ':00'
+          })
+          .eq('id', editingId);
+
+        if (error) throw error;
         toast({ title: 'Sucesso', description: 'Agendamento atualizado.' });
       } else {
-        await api.createAppointment({
+        const { error } = await supabase.from('appointments').insert({
+          user_id: formData.user_id,
           professional_id: formData.professional_id,
-          procedure: prof?.specialty || '',
-          date: formData.date,
-          time: formData.time + ':00',
+          specialty_id: formData.specialty_id,
+          appointment_date: formData.date,
+          appointment_time: formData.time + ':00',
         });
+
+        if (error) throw error;
         toast({ title: 'Sucesso', description: 'Agendamento criado.' });
       }
       fetchData();
       setShowDialog(false);
     } catch (error: any) {
-      if (error.message?.includes('Horário já ocupado') || error.message?.includes('409')) {
-        toast({ 
-          variant: 'destructive', 
-          title: 'Conflito de horário', 
-          description: 'Este profissional já possui um agendamento neste horário.' 
-        });
-      } else {
-        toast({ variant: 'destructive', title: 'Erro', description: error.message });
-      }
+      toast({ variant: 'destructive', title: 'Erro', description: error.message });
     }
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    try {
-      await api.updateAppointmentStatus(id, status);
+    const { error } = await supabase
+      .from('appointments')
+      .update({ status })
+      .eq('id', id);
+
+    if (error) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar o status.' });
+    } else {
       toast({ title: 'Status atualizado' });
       fetchData();
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar o status.' });
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este agendamento?')) return;
-    try {
-      await api.cancelAppointment(id, 'Excluído pelo administrador');
+    
+    const { error } = await supabase.from('appointments').delete().eq('id', id);
+
+    if (error) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível excluir.' });
+    } else {
       toast({ title: 'Agendamento excluído' });
       fetchData();
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível excluir.' });
     }
   };
 
-  const getUserName = (apt: Appointment) => apt.user_name || apt.profiles?.name || 'N/A';
-  const getUserEmail = (apt: Appointment) => apt.user_email || apt.profiles?.email || 'N/A';
-  const getProfessionalName = (apt: Appointment) => apt.professional_name || apt.professionals?.name || 'N/A';
-
   const filteredAppointments = appointments.filter(apt => {
-    const userName = getUserName(apt).toLowerCase();
-    const userEmail = getUserEmail(apt).toLowerCase();
-    const profName = getProfessionalName(apt).toLowerCase();
-    const matchesSearch = userName.includes(searchTerm.toLowerCase()) ||
-      userEmail.includes(searchTerm.toLowerCase()) ||
-      profName.includes(searchTerm.toLowerCase());
+    const matchesSearch = 
+      apt.user_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      apt.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      apt.professional_name?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || apt.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -206,7 +229,7 @@ export default function AdminAppointments() {
                 <TableHead>Data/Hora</TableHead>
                 <TableHead>Usuário</TableHead>
                 <TableHead>Profissional</TableHead>
-                <TableHead>Procedimento</TableHead>
+                <TableHead>Especialidade</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -215,15 +238,15 @@ export default function AdminAppointments() {
               {filteredAppointments.map(apt => (
                 <TableRow key={apt.id}>
                   <TableCell>
-                    <div className="font-medium">{format(parseISO(apt.date), 'dd/MM/yyyy')}</div>
-                    <div className="text-sm text-muted-foreground">{apt.time.substring(0, 5)}</div>
+                    <div className="font-medium">{format(parseISO(apt.appointment_date), 'dd/MM/yyyy')}</div>
+                    <div className="text-sm text-muted-foreground">{apt.appointment_time.substring(0, 5)}</div>
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium">{getUserName(apt)}</div>
-                    <div className="text-sm text-muted-foreground">{getUserEmail(apt)}</div>
+                    <div className="font-medium">{apt.user_name}</div>
+                    <div className="text-sm text-muted-foreground">{apt.user_email}</div>
                   </TableCell>
-                  <TableCell>{getProfessionalName(apt)}</TableCell>
-                  <TableCell>{apt.procedure}</TableCell>
+                  <TableCell>{apt.professional_name}</TableCell>
+                  <TableCell>{apt.specialty_name}</TableCell>
                   <TableCell>
                     <Select value={apt.status} onValueChange={(newStatus) => handleStatusChange(apt.id, newStatus)}>
                       <SelectTrigger className="w-36">
@@ -231,24 +254,16 @@ export default function AdminAppointments() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="scheduled">
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="h-3 w-3" />Agendado
-                          </span>
+                          <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />Agendado</span>
                         </SelectItem>
                         <SelectItem value="completed">
-                          <span className="inline-flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />Concluído
-                          </span>
+                          <span className="inline-flex items-center gap-1"><CheckCircle className="h-3 w-3" />Concluído</span>
                         </SelectItem>
                         <SelectItem value="cancelled">
-                          <span className="inline-flex items-center gap-1">
-                            <XCircle className="h-3 w-3" />Cancelado
-                          </span>
+                          <span className="inline-flex items-center gap-1"><XCircle className="h-3 w-3" />Cancelado</span>
                         </SelectItem>
                         <SelectItem value="no_show">
-                          <span className="inline-flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" />Falta
-                          </span>
+                          <span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Falta</span>
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -281,7 +296,16 @@ export default function AdminAppointments() {
               <Select value={formData.user_id} onValueChange={(v) => setFormData({ ...formData, user_id: v })}>
                 <SelectTrigger><SelectValue placeholder="Selecione um usuário" /></SelectTrigger>
                 <SelectContent>
-                  {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.email})</SelectItem>)}
+                  {users.map(u => <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Especialidade</Label>
+              <Select value={formData.specialty_id} onValueChange={(v) => setFormData({ ...formData, specialty_id: v })}>
+                <SelectTrigger><SelectValue placeholder="Selecione uma especialidade" /></SelectTrigger>
+                <SelectContent>
+                  {specialties.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -290,7 +314,7 @@ export default function AdminAppointments() {
               <Select value={formData.professional_id} onValueChange={(v) => setFormData({ ...formData, professional_id: v })}>
                 <SelectTrigger><SelectValue placeholder="Selecione um profissional" /></SelectTrigger>
                 <SelectContent>
-                  {professionals.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - {p.specialty}</SelectItem>)}
+                  {professionals.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

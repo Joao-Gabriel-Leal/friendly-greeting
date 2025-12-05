@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 interface TimeSelectorProps {
   professionalId: string;
   professionalName: string;
+  specialtyId: string;
   specialty: string;
   date: Date;
   onComplete: () => void;
@@ -19,8 +20,8 @@ interface TimeSelectorProps {
 
 const timeSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
 
-export default function TimeSelector({ professionalId, professionalName, specialty, date, onComplete, onBack }: TimeSelectorProps) {
-  const { profile } = useAuth();
+export default function TimeSelector({ professionalId, professionalName, specialtyId, specialty, date, onComplete, onBack }: TimeSelectorProps) {
+  const { user, profile } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
@@ -33,8 +34,16 @@ export default function TimeSelector({ professionalId, professionalName, special
 
   const fetchBookedSlots = async () => {
     try {
-      const response = await api.getBookedSlots(professionalId, format(date, 'yyyy-MM-dd'));
-      setBookedSlots(response.bookedSlots || []);
+      const { data } = await supabase
+        .from('appointments')
+        .select('appointment_time')
+        .eq('professional_id', professionalId)
+        .eq('appointment_date', format(date, 'yyyy-MM-dd'))
+        .in('status', ['scheduled', 'completed']);
+
+      if (data) {
+        setBookedSlots(data.map(a => a.appointment_time.substring(0, 5)));
+      }
     } catch (error) {
       console.error('Error fetching booked slots:', error);
       setBookedSlots([]);
@@ -43,32 +52,20 @@ export default function TimeSelector({ professionalId, professionalName, special
   };
 
   const handleBook = async () => {
-    if (!selectedTime || !profile) return;
+    if (!selectedTime || !user) return;
 
     setBooking(true);
 
     try {
-      await api.createAppointment({
+      const { error } = await supabase.from('appointments').insert({
+        user_id: user.id,
         professional_id: professionalId,
-        procedure: specialty,
-        date: format(date, 'yyyy-MM-dd'),
-        time: selectedTime + ':00',
+        specialty_id: specialtyId,
+        appointment_date: format(date, 'yyyy-MM-dd'),
+        appointment_time: selectedTime + ':00',
       });
 
-      // Envia email de confirmação
-      try {
-        await api.sendConfirmationEmail({
-          userEmail: profile.email,
-          userName: profile.name,
-          specialty,
-          professionalName,
-          date: format(date, 'yyyy-MM-dd'),
-          time: selectedTime
-        });
-        console.log('Confirmation email sent');
-      } catch (emailError) {
-        console.error('Error sending confirmation email:', emailError);
-      }
+      if (error) throw error;
 
       toast({
         title: 'Agendamento confirmado!',
@@ -76,11 +73,11 @@ export default function TimeSelector({ professionalId, professionalName, special
       });
       onComplete();
     } catch (error: any) {
-      if (error.message?.includes('Horário já ocupado') || error.message?.includes('409')) {
+      if (error.message?.includes('duplicate') || error.code === '23505') {
         toast({
           variant: 'destructive',
           title: 'Horário indisponível',
-          description: 'Este horário acabou de ser reservado por outro usuário. Por favor, escolha outro horário.',
+          description: 'Este horário acabou de ser reservado. Por favor, escolha outro.',
         });
         fetchBookedSlots();
       } else {

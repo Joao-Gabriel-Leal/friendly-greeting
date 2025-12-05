@@ -3,46 +3,25 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Plus, Edit, Trash2, Ban, CheckCircle, Search, KeyRound, ShieldX } from 'lucide-react';
+import { Loader2, Edit, Trash2, Ban, CheckCircle, Search, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO, addDays } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-
-interface SpecialtyBlock {
-  specialty: string;
-  blocked_until: string;
-}
 
 interface User {
   id: string;
+  user_id: string;
   name: string;
   email: string;
-  role: 'user' | 'admin';
-  department: string | null;
+  phone: string | null;
   suspended_until: string | null;
-  blocked_specialties?: SpecialtyBlock[];
   created_at: string;
+  role: 'user' | 'admin';
 }
-
-const SPECIALTIES = ['Massagem', 'Nutrição', 'Psicologia'];
-
-const DEPARTMENTS = [
-  'Administração',
-  'Financeiro',
-  'Recursos Humanos',
-  'Marketing',
-  'Adesão/Comercial',
-  'Produção/Operações',
-  'Logística',
-  'Tecnologia da Informação',
-  'Jurídico',
-  'Atendimento ao Cliente',
-] as const;
 
 export default function AdminUsers() {
   const { toast } = useToast();
@@ -51,10 +30,8 @@ export default function AdminUsers() {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [showBlockDialog, setShowBlockDialog] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', role: 'user' as 'user' | 'admin', department: '' });
-  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+  const [formData, setFormData] = useState({ name: '', email: '', role: 'user' as 'user' | 'admin' });
   const [newPassword, setNewPassword] = useState('');
 
   useEffect(() => {
@@ -68,58 +45,62 @@ export default function AdminUsers() {
       .order('created_at', { ascending: false });
 
     if (profilesData && !profilesError) {
-      // Fetch specialty blocks for all users
-      const { data: blocksData } = await supabase
-        .from('user_specialty_blocks')
-        .select('user_id, specialty, blocked_until')
-        .gte('blocked_until', new Date().toISOString());
+      // Fetch roles for all users
+      const userIds = profilesData.map(p => p.user_id);
+      const { data: rolesData } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .in('user_id', userIds);
 
-      const usersWithBlocks = profilesData.map(user => ({
+      const rolesMap = new Map(rolesData?.map(r => [r.user_id, r.role]) || []);
+
+      const usersWithRoles = profilesData.map(user => ({
         ...user,
-        blocked_specialties: blocksData?.filter(b => b.user_id === user.id).map(b => ({
-          specialty: b.specialty,
-          blocked_until: b.blocked_until
-        })) || []
+        role: (rolesMap.get(user.user_id) || 'user') as 'user' | 'admin'
       }));
 
-      setUsers(usersWithBlocks as User[]);
+      setUsers(usersWithRoles);
     }
     setLoading(false);
   };
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
-    setFormData({ name: user.name, email: user.email, role: user.role, department: user.department || '' });
+    setFormData({ name: user.name, email: user.email, role: user.role });
     setShowDialog(true);
   };
 
   const handleSave = async () => {
     if (!editingUser) return;
 
-    const { error } = await supabase
+    const { error: profileError } = await supabase
       .from('profiles')
-      .update({ name: formData.name, role: formData.role, department: formData.department || null })
+      .update({ name: formData.name })
       .eq('id', editingUser.id);
 
-    if (error) {
+    if (profileError) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar o usuário.' });
-    } else {
-      // Also update user_roles table
-      await supabase.from('user_roles').upsert({ 
-        user_id: editingUser.id, 
+      return;
+    }
+
+    // Update role in user_roles table
+    const { error: roleError } = await supabase
+      .from('user_roles')
+      .upsert({ 
+        user_id: editingUser.user_id, 
         role: formData.role 
       }, { onConflict: 'user_id,role' });
 
-      toast({ title: 'Sucesso', description: 'Usuário atualizado com sucesso.' });
-      fetchUsers();
-      setShowDialog(false);
+    if (roleError) {
+      console.error('Error updating role:', roleError);
     }
+
+    toast({ title: 'Sucesso', description: 'Usuário atualizado com sucesso.' });
+    fetchUsers();
+    setShowDialog(false);
   };
 
-  const handleSuspend = async (userId: string, suspend: boolean) => {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
-
+  const handleSuspend = async (user: User, suspend: boolean) => {
     const suspendedUntil = suspend 
       ? new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString() 
       : null;
@@ -127,35 +108,11 @@ export default function AdminUsers() {
     const { error } = await supabase
       .from('profiles')
       .update({ suspended_until: suspendedUntil })
-      .eq('id', userId);
+      .eq('id', user.id);
 
     if (error) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar a suspensão.' });
     } else {
-      // Enviar e-mail de notificação
-      try {
-        if (suspend) {
-          await supabase.functions.invoke('send-suspension-email', {
-            body: {
-              userEmail: user.email,
-              userName: user.name,
-              reason: 'Suspensão aplicada pela administração',
-              suspendedUntil: suspendedUntil
-            }
-          });
-        } else {
-          await supabase.functions.invoke('send-suspension-lifted-email', {
-            body: {
-              userEmail: user.email,
-              userName: user.name,
-              liftedByAdmin: true
-            }
-          });
-        }
-      } catch (emailError) {
-        console.error('Erro ao enviar e-mail:', emailError);
-      }
-
       toast({ 
         title: 'Sucesso', 
         description: suspend ? 'Usuário suspenso por 60 dias.' : 'Suspensão removida.' 
@@ -164,83 +121,15 @@ export default function AdminUsers() {
     }
   };
 
-  const handleDelete = async (userId: string) => {
+  const handleDelete = async (user: User) => {
     if (!confirm('Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.')) return;
 
-    const { error } = await supabase.from('profiles').delete().eq('id', userId);
+    const { error } = await supabase.from('profiles').delete().eq('id', user.id);
 
     if (error) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível excluir o usuário.' });
     } else {
       toast({ title: 'Sucesso', description: 'Usuário excluído com sucesso.' });
-      fetchUsers();
-    }
-  };
-
-  const handleBlockSpecialties = (user: User) => {
-    setEditingUser(user);
-    setSelectedSpecialties([]);
-    setShowBlockDialog(true);
-  };
-
-  const handleSaveSpecialtyBlock = async () => {
-    if (!editingUser || selectedSpecialties.length === 0) return;
-
-    const blockedUntil = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
-
-    const promises = selectedSpecialties.map(specialty =>
-      supabase.from('user_specialty_blocks').upsert({
-        user_id: editingUser.id,
-        specialty,
-        blocked_until: blockedUntil
-      }, { onConflict: 'user_id,specialty' })
-    );
-
-    const results = await Promise.all(promises);
-    const hasError = results.some(r => r.error);
-
-    if (hasError) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível bloquear especialidades.' });
-    } else {
-      toast({ 
-        title: 'Sucesso', 
-        description: `${selectedSpecialties.length} especialidade(s) bloqueada(s) por 60 dias.` 
-      });
-      fetchUsers();
-      setShowBlockDialog(false);
-      setSelectedSpecialties([]);
-    }
-  };
-
-  const handleUnblockSpecialty = async (userId: string, specialty: string) => {
-    const user = users.find(u => u.id === userId);
-    
-    const { error } = await supabase
-      .from('user_specialty_blocks')
-      .delete()
-      .eq('user_id', userId)
-      .eq('specialty', specialty);
-
-    if (error) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível desbloquear especialidade.' });
-    } else {
-      // Enviar e-mail de notificação
-      if (user) {
-        try {
-          await supabase.functions.invoke('send-suspension-lifted-email', {
-            body: {
-              userEmail: user.email,
-              userName: user.name,
-              liftedByAdmin: true,
-              specialty: specialty
-            }
-          });
-        } catch (emailError) {
-          console.error('Erro ao enviar e-mail:', emailError);
-        }
-      }
-
-      toast({ title: 'Sucesso', description: `Especialidade ${specialty} desbloqueada.` });
       fetchUsers();
     }
   };
@@ -264,28 +153,18 @@ export default function AdminUsers() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-update-password`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({
-            userId: editingUser.id,
-            newPassword: newPassword,
-          }),
-        }
-      );
+      const response = await supabase.functions.invoke('admin-update-password', {
+        body: {
+          userId: editingUser.user_id,
+          newPassword: newPassword,
+        },
+      });
 
-      const result = await response.json();
-
-      if (!response.ok || result.error) {
+      if (response.error) {
         toast({ 
           variant: 'destructive', 
           title: 'Erro', 
-          description: result.error || 'Não foi possível alterar a senha.' 
+          description: response.error.message || 'Não foi possível alterar a senha.' 
         });
       } else {
         toast({ title: 'Sucesso', description: 'Senha alterada com sucesso.' });
@@ -336,7 +215,6 @@ export default function AdminUsers() {
               <TableRow>
                 <TableHead>Nome</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Departamento</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Cadastro</TableHead>
@@ -352,11 +230,6 @@ export default function AdminUsers() {
                     <TableCell className="font-medium">{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
-                      <span className="text-sm text-muted-foreground">
-                        {user.department || '—'}
-                      </span>
-                    </TableCell>
-                    <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         user.role === 'admin' 
                           ? 'bg-primary/10 text-primary' 
@@ -366,37 +239,13 @@ export default function AdminUsers() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-1">
-                        {isSuspended ? (
-                          <span className="text-destructive text-sm block">
-                            Suspenso até {format(parseISO(user.suspended_until!), 'dd/MM/yyyy')}
-                          </span>
-                        ) : (
-                          <span className="text-success text-sm block">Ativo</span>
-                        )}
-                        {user.blocked_specialties && user.blocked_specialties.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {user.blocked_specialties.map((block: SpecialtyBlock) => (
-                              <span 
-                                key={block.specialty}
-                                className="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-700 flex items-center gap-1"
-                              >
-                                {block.specialty}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleUnblockSpecialty(user.id, block.specialty);
-                                  }}
-                                  className="hover:text-orange-900"
-                                  title="Desbloquear"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {isSuspended ? (
+                        <span className="text-destructive text-sm">
+                          Suspenso até {format(parseISO(user.suspended_until!), 'dd/MM/yyyy')}
+                        </span>
+                      ) : (
+                        <span className="text-success text-sm">Ativo</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {format(parseISO(user.created_at), 'dd/MM/yyyy', { locale: ptBR })}
@@ -405,14 +254,6 @@ export default function AdminUsers() {
                       <div className="flex items-center justify-end gap-2">
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(user)} title="Editar">
                           <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleBlockSpecialties(user)} 
-                          title="Bloquear especialidades"
-                        >
-                          <ShieldX className="h-4 w-4 text-orange-500" />
                         </Button>
                         <Button 
                           variant="ghost" 
@@ -427,7 +268,7 @@ export default function AdminUsers() {
                             variant="ghost" 
                             size="icon" 
                             className="text-success"
-                            onClick={() => handleSuspend(user.id, false)}
+                            onClick={() => handleSuspend(user, false)}
                             title="Reativar usuário"
                           >
                             <CheckCircle className="h-4 w-4" />
@@ -437,8 +278,8 @@ export default function AdminUsers() {
                             variant="ghost" 
                             size="icon" 
                             className="text-warning"
-                            onClick={() => handleSuspend(user.id, true)}
-                            title="Suspender conta completa"
+                            onClick={() => handleSuspend(user, true)}
+                            title="Suspender conta"
                           >
                             <Ban className="h-4 w-4" />
                           </Button>
@@ -447,7 +288,7 @@ export default function AdminUsers() {
                           variant="ghost" 
                           size="icon" 
                           className="text-destructive"
-                          onClick={() => handleDelete(user.id)}
+                          onClick={() => handleDelete(user)}
                           title="Excluir usuário"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -491,68 +332,10 @@ export default function AdminUsers() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Departamento</Label>
-              <Select value={formData.department} onValueChange={(v) => setFormData({ ...formData, department: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o departamento" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEPARTMENTS.map((dept) => (
-                    <SelectItem key={dept} value={dept}>
-                      {dept}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDialog(false)}>Cancelar</Button>
             <Button onClick={handleSave} className="gradient-primary">Salvar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Bloquear Especialidades</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">
-              Selecione as especialidades que deseja bloquear por 60 dias para <strong>{editingUser?.name}</strong>:
-            </p>
-            <div className="space-y-3">
-              {SPECIALTIES.map(specialty => (
-                <div key={specialty} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={`specialty-${specialty}`}
-                    checked={selectedSpecialties.includes(specialty)}
-                    onCheckedChange={(checked) => {
-                      if (checked) {
-                        setSelectedSpecialties([...selectedSpecialties, specialty]);
-                      } else {
-                        setSelectedSpecialties(selectedSpecialties.filter(s => s !== specialty));
-                      }
-                    }}
-                  />
-                  <Label htmlFor={`specialty-${specialty}`} className="cursor-pointer">
-                    {specialty}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBlockDialog(false)}>Cancelar</Button>
-            <Button 
-              onClick={handleSaveSpecialtyBlock} 
-              className="gradient-primary"
-              disabled={selectedSpecialties.length === 0}
-            >
-              Bloquear Selecionadas
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
