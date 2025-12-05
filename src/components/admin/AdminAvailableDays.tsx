@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
@@ -12,7 +12,12 @@ import { ptBR } from 'date-fns/locale';
 interface Professional {
   id: string;
   name: string;
-  specialty: string;
+}
+
+interface AvailableDay {
+  id: string;
+  professional_id: string;
+  day_of_week: number;
 }
 
 export default function AdminAvailableDays() {
@@ -20,9 +25,11 @@ export default function AdminAvailableDays() {
   const [loading, setLoading] = useState(true);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [selectedProfessional, setSelectedProfessional] = useState<string>('');
-  const [availableDays, setAvailableDays] = useState<Date[]>([]);
-  const [selectedDates, setSelectedDates] = useState<Date[]>([]);
+  const [availableDays, setAvailableDays] = useState<number[]>([]);
+  const [selectedDays, setSelectedDays] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
   useEffect(() => {
     fetchProfessionals();
@@ -35,35 +42,29 @@ export default function AdminAvailableDays() {
   }, [selectedProfessional]);
 
   const fetchProfessionals = async () => {
-    try {
-      const data = await api.getProfessionals();
+    const { data, error } = await supabase.from('professionals').select('id, name');
+    if (data && !error) {
       setProfessionals(data);
       if (data.length > 0) {
         setSelectedProfessional(data[0].id);
       }
-    } catch (error) {
-      console.error('Error fetching professionals:', error);
     }
     setLoading(false);
   };
 
   const fetchAvailableDays = async () => {
-    const today = startOfDay(new Date());
-    const maxDate = addDays(today, 60);
+    const { data, error } = await supabase
+      .from('available_days')
+      .select('day_of_week')
+      .eq('professional_id', selectedProfessional);
 
-    try {
-      const data = await api.getAvailableDays(
-        selectedProfessional,
-        format(today, 'yyyy-MM-dd'),
-        format(maxDate, 'yyyy-MM-dd')
-      );
-      const dates = data.map((d: any) => new Date(d.date + 'T12:00:00'));
-      setAvailableDays(dates);
-      setSelectedDates(dates);
-    } catch (error) {
-      console.error('Error fetching available days:', error);
+    if (data && !error) {
+      const days = data.map(d => d.day_of_week);
+      setAvailableDays(days);
+      setSelectedDays(days);
+    } else {
       setAvailableDays([]);
-      setSelectedDates([]);
+      setSelectedDays([]);
     }
   };
 
@@ -72,28 +73,31 @@ export default function AdminAvailableDays() {
 
     try {
       // Delete existing available days for this professional
-      const existingDays = await api.getAvailableDays(
-        selectedProfessional,
-        format(startOfDay(new Date()), 'yyyy-MM-dd'),
-        format(addDays(startOfDay(new Date()), 60), 'yyyy-MM-dd')
-      );
-      
-      for (const day of existingDays) {
-        await api.deleteAvailableDay(day.id);
-      }
+      await supabase
+        .from('available_days')
+        .delete()
+        .eq('professional_id', selectedProfessional);
 
       // Insert new available days
-      for (const date of selectedDates) {
-        await api.createAvailableDay(selectedProfessional, format(date, 'yyyy-MM-dd'));
+      if (selectedDays.length > 0) {
+        const inserts = selectedDays.map(day => ({
+          professional_id: selectedProfessional,
+          day_of_week: day,
+          start_time: '09:00:00',
+          end_time: '17:00:00'
+        }));
+
+        const { error } = await supabase.from('available_days').insert(inserts);
+        if (error) throw error;
       }
 
       toast({ 
         title: 'Sucesso', 
-        description: selectedDates.length > 0 
-          ? `${selectedDates.length} dias marcados como disponíveis.` 
+        description: selectedDays.length > 0 
+          ? `${selectedDays.length} dias marcados como disponíveis.` 
           : 'Disponibilidade limpa.'
       });
-      setAvailableDays(selectedDates);
+      setAvailableDays(selectedDays);
     } catch (error) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível salvar.' });
     }
@@ -101,23 +105,12 @@ export default function AdminAvailableDays() {
     setSaving(false);
   };
 
-  const handleClearAll = () => {
-    setSelectedDates([]);
-  };
-
-  const today = startOfDay(new Date());
-  const maxDate = addDays(today, 60);
-
-  const modifiers = {
-    available: selectedDates,
-  };
-
-  const modifiersStyles = {
-    available: {
-      backgroundColor: 'hsl(var(--primary))',
-      color: 'hsl(var(--primary-foreground))',
-      borderRadius: '0.5rem',
-    },
+  const toggleDay = (day: number) => {
+    if (selectedDays.includes(day)) {
+      setSelectedDays(selectedDays.filter(d => d !== day));
+    } else {
+      setSelectedDays([...selectedDays, day].sort());
+    }
   };
 
   if (loading) {
@@ -134,11 +127,10 @@ export default function AdminAvailableDays() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CalendarCheck className="h-5 w-5" />
-            Marcar Disponibilidade
+            Configurar Dias de Trabalho
           </CardTitle>
           <CardDescription>
-            Selecione os dias em que o profissional estará disponível para agendamentos.
-            Clique nas datas para marcar/desmarcar.
+            Selecione os dias da semana em que o profissional estará disponível para agendamentos.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -150,7 +142,7 @@ export default function AdminAvailableDays() {
               <SelectContent>
                 {professionals.map(p => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.name} - {p.specialty}
+                    {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -159,27 +151,32 @@ export default function AdminAvailableDays() {
 
           <div className="flex flex-col lg:flex-row gap-6">
             <div className="flex-1">
-              <Calendar
-                mode="multiple"
-                selected={selectedDates}
-                onSelect={(dates) => dates && setSelectedDates(dates)}
-                locale={ptBR}
-                disabled={(date) => {
-                  const normalizedDate = startOfDay(date);
-                  return normalizedDate < today || normalizedDate > maxDate || date.getDay() === 0 || date.getDay() === 6;
-                }}
-                modifiers={modifiers}
-                modifiersStyles={modifiersStyles}
-                className="rounded-md border pointer-events-auto"
-                numberOfMonths={2}
-              />
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">Clique nos dias para ativar/desativar:</p>
+                <div className="flex flex-wrap gap-3">
+                  {dayNames.map((name, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => toggleDay(index)}
+                      className={`px-6 py-4 rounded-lg text-sm font-medium transition-all ${
+                        selectedDays.includes(index)
+                          ? 'bg-primary text-primary-foreground shadow-md'
+                          : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="lg:w-64 space-y-4">
               <Card className="bg-secondary/30">
                 <CardContent className="pt-4">
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">{selectedDates.length}</div>
+                    <div className="text-3xl font-bold text-primary">{selectedDays.length}</div>
                     <div className="text-sm text-muted-foreground">dias selecionados</div>
                   </div>
                 </CardContent>
@@ -189,16 +186,16 @@ export default function AdminAvailableDays() {
                 <Button onClick={handleSave} className="w-full gradient-primary" disabled={saving}>
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar Disponibilidade'}
                 </Button>
-                <Button variant="outline" onClick={handleClearAll} className="w-full">
+                <Button variant="outline" onClick={() => setSelectedDays([])} className="w-full">
                   <Trash2 className="h-4 w-4 mr-2" />
                   Limpar Seleção
                 </Button>
               </div>
 
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>• Dias em azul estão marcados como disponíveis</p>
+                <p>• Dias marcados ficam disponíveis para agendamento</p>
+                <p>• O horário padrão é das 09h às 17h</p>
                 <p>• Usuários só podem agendar nos dias marcados</p>
-                <p>• Se nenhum dia estiver marcado, aplica-se a regra padrão</p>
               </div>
             </div>
           </div>

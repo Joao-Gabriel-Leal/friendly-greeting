@@ -21,12 +21,14 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
   const { profile, signOut } = useAuth();
   const [step, setStep] = useState<Step>('home');
   const [selectedSpecialty, setSelectedSpecialty] = useState<string | null>(null);
+  const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string | null>(null);
   const [selectedProfessional, setSelectedProfessional] = useState<string | null>(null);
   const [selectedProfessionalName, setSelectedProfessionalName] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  const handleSpecialtySelect = (specialty: string, professionalId: string, professionalName: string) => {
+  const handleSpecialtySelect = (specialty: string, specialtyId: string, professionalId: string, professionalName: string) => {
     setSelectedSpecialty(specialty);
+    setSelectedSpecialtyId(specialtyId);
     setSelectedProfessional(professionalId);
     setSelectedProfessionalName(professionalName);
     setStep('date');
@@ -41,6 +43,7 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
     if (step === 'date') {
       setStep('specialty');
       setSelectedSpecialty(null);
+      setSelectedSpecialtyId(null);
       setSelectedProfessional(null);
       setSelectedProfessionalName(null);
     } else if (step === 'time') {
@@ -54,6 +57,7 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
   const handleComplete = () => {
     setStep('appointments');
     setSelectedSpecialty(null);
+    setSelectedSpecialtyId(null);
     setSelectedProfessional(null);
     setSelectedProfessionalName(null);
     setSelectedDate(null);
@@ -114,7 +118,7 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
             <div>
               <span className="font-semibold text-foreground block">Agendamento</span>
               <span className="text-xs text-muted-foreground">
-                Olá, {profile?.name} {profile?.department && `• ${profile.department}`}
+                Olá, {profile?.name}
               </span>
             </div>
           </div>
@@ -170,7 +174,7 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
                 <h4 className="font-medium text-foreground mb-2">Regras importantes:</h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
                   <li>• Apenas 1 agendamento por mês por especialidade</li>
-                  <li>• Horários disponíveis: 09h às 17h (podem sofrer alterações futuras)</li>
+                  <li>• Horários disponíveis: 09h às 17h</li>
                   <li>• Cancelar no dia da consulta gera suspensão de 60 dias</li>
                 </ul>
               </CardContent>
@@ -182,19 +186,21 @@ export default function UserDashboard({ isSuspended, suspendedUntil }: UserDashb
           <SpecialtySelector onSelect={handleSpecialtySelect} onBack={handleBack} />
         )}
 
-        {step === 'date' && selectedProfessional && (
+        {step === 'date' && selectedProfessional && selectedSpecialtyId && (
           <DateSelector 
             professionalId={selectedProfessional}
+            specialtyId={selectedSpecialtyId}
             specialty={selectedSpecialty!}
             onSelect={handleDateSelect}
             onBack={handleBack}
           />
         )}
 
-        {step === 'time' && selectedProfessional && selectedDate && (
+        {step === 'time' && selectedProfessional && selectedDate && selectedSpecialtyId && (
           <TimeSelector
             professionalId={selectedProfessional}
             professionalName={selectedProfessionalName!}
+            specialtyId={selectedSpecialtyId}
             specialty={selectedSpecialty!}
             date={selectedDate}
             onComplete={handleComplete}

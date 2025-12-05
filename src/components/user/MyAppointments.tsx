@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,14 +20,12 @@ import {
 
 interface Appointment {
   id: string;
-  procedure: string;
-  date: string;
-  time: string;
+  specialty_id: string;
+  specialty_name: string;
+  appointment_date: string;
+  appointment_time: string;
   status: string;
-  professional_name?: string;
-  professionals?: {
-    name: string;
-  };
+  professional_name: string;
 }
 
 interface MyAppointmentsProps {
@@ -35,7 +33,7 @@ interface MyAppointmentsProps {
 }
 
 export default function MyAppointments({ onBack }: MyAppointmentsProps) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -53,8 +51,36 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
     }
 
     try {
-      const data = await api.getMyAppointments();
-      setAppointments(data);
+      const { data: appointmentsData } = await supabase
+        .from('appointments')
+        .select('id, specialty_id, appointment_date, appointment_time, status, professional_id')
+        .eq('user_id', user.id)
+        .order('appointment_date', { ascending: false });
+
+      if (!appointmentsData) {
+        setAppointments([]);
+        setLoading(false);
+        return;
+      }
+
+      const specialtyIds = [...new Set(appointmentsData.map(a => a.specialty_id).filter(Boolean))];
+      const professionalIds = [...new Set(appointmentsData.map(a => a.professional_id).filter(Boolean))];
+
+      const [specialtiesRes, professionalsRes] = await Promise.all([
+        supabase.from('specialties').select('id, name').in('id', specialtyIds),
+        supabase.from('professionals').select('id, name').in('id', professionalIds)
+      ]);
+
+      const specialtiesMap = new Map(specialtiesRes.data?.map(s => [s.id, s.name]) || []);
+      const professionalsMap = new Map(professionalsRes.data?.map(p => [p.id, p.name]) || []);
+
+      const enrichedAppointments = appointmentsData.map(apt => ({
+        ...apt,
+        specialty_name: specialtiesMap.get(apt.specialty_id) || 'N/A',
+        professional_name: professionalsMap.get(apt.professional_id) || 'N/A'
+      }));
+
+      setAppointments(enrichedAppointments);
     } catch (err) {
       console.error('Erro:', err);
     } finally {
@@ -87,38 +113,25 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
     }
 
     try {
-      await api.cancelAppointment(id, withSuspension ? 'Cancelado no dia' : 'Cancelado pelo usuário');
+      const { error } = await supabase
+        .from('appointments')
+        .update({ 
+          status: 'cancelled',
+          notes: withSuspension ? 'Cancelado no dia' : 'Cancelado pelo usuário'
+        })
+        .eq('id', id);
 
-      // Envia email de cancelamento
-      if (profile?.email) {
-        try {
-          await api.sendCancellationEmail({
-            userEmail: profile.email,
-            userName: profile.name,
-            specialty: appointment.procedure,
-            date: appointment.date,
-            time: appointment.time.substring(0, 5),
-            isSameDayCancellation: withSuspension
-          });
-        } catch (emailError) {
-          console.error('Error sending cancellation email:', emailError);
-        }
-      }
+      if (error) throw error;
 
-      // Aplica bloqueio de especialidade se cancelar no mesmo dia
+      // Apply suspension if cancelled same day
       if (withSuspension && user) {
-        try {
-          const blockedUntil = new Date();
-          blockedUntil.setDate(blockedUntil.getDate() + 60);
-          await api.createSpecialtyBlock(user.id, appointment.procedure, blockedUntil.toISOString());
-        } catch (blockError) {
-          console.error('Erro ao bloquear especialidade:', blockError);
-          toast({
-            variant: 'destructive',
-            title: 'Aviso',
-            description: 'Agendamento cancelado, mas houve erro ao aplicar o bloqueio da especialidade.',
-          });
-        }
+        const suspendedUntil = new Date();
+        suspendedUntil.setDate(suspendedUntil.getDate() + 60);
+        
+        await supabase
+          .from('profiles')
+          .update({ suspended_until: suspendedUntil.toISOString() })
+          .eq('user_id', user.id);
       }
 
       setCancellingId(null);
@@ -127,7 +140,7 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
       toast({
         title: 'Agendamento cancelado',
         description: withSuspension 
-          ? `Você foi bloqueado de agendar ${appointment.procedure} por 60 dias.`
+          ? 'Você foi suspenso por 60 dias devido ao cancelamento no dia.'
           : 'Seu agendamento foi cancelado com sucesso.',
         variant: withSuspension ? 'destructive' : 'default',
       });
@@ -193,14 +206,10 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
   const now = new Date();
 
   const getAppointmentDateTime = (appointment: Appointment) => {
-    const [hours, minutes] = appointment.time.split(':').map(Number);
-    const appointmentDate = parseISO(appointment.date);
+    const [hours, minutes] = appointment.appointment_time.split(':').map(Number);
+    const appointmentDate = parseISO(appointment.appointment_date);
     appointmentDate.setHours(hours, minutes, 0, 0);
     return appointmentDate;
-  };
-
-  const getProfessionalName = (apt: Appointment) => {
-    return apt.professional_name || apt.professionals?.name || 'Profissional';
   };
 
   const upcomingAppointments = appointments
@@ -241,20 +250,20 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
                   <div className="flex items-stretch">
                     <div className="w-20 gradient-primary flex flex-col items-center justify-center text-primary-foreground p-4">
                       <span className="text-2xl font-bold">
-                        {format(parseISO(appointment.date), 'dd')}
+                        {format(parseISO(appointment.appointment_date), 'dd')}
                       </span>
                       <span className="text-xs uppercase">
-                        {format(parseISO(appointment.date), 'MMM', { locale: ptBR })}
+                        {format(parseISO(appointment.appointment_date), 'MMM', { locale: ptBR })}
                       </span>
                     </div>
                     <div className="flex-1 p-4">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h4 className="font-semibold text-foreground">{appointment.procedure}</h4>
-                          <p className="text-sm text-muted-foreground">{getProfessionalName(appointment)}</p>
+                          <h4 className="font-semibold text-foreground">{appointment.specialty_name}</h4>
+                          <p className="text-sm text-muted-foreground">{appointment.professional_name}</p>
                           <p className="text-sm text-muted-foreground mt-1">
                             <Clock className="h-3 w-3 inline mr-1" />
-                            {appointment.time.substring(0, 5)}
+                            {appointment.appointment_time.substring(0, 5)}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
@@ -263,7 +272,7 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
                             variant="ghost"
                             size="sm"
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => handleCancelClick(appointment.id, appointment.date)}
+                            onClick={() => handleCancelClick(appointment.id, appointment.appointment_date)}
                           >
                             Cancelar
                           </Button>
@@ -287,9 +296,9 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-medium text-foreground">{appointment.procedure}</h4>
+                      <h4 className="font-medium text-foreground">{appointment.specialty_name}</h4>
                       <p className="text-sm text-muted-foreground">
-                        {format(parseISO(appointment.date), "dd/MM/yyyy", { locale: ptBR })} às {appointment.time.substring(0, 5)}
+                        {format(parseISO(appointment.appointment_date), "dd/MM/yyyy", { locale: ptBR })} às {appointment.appointment_time.substring(0, 5)}
                       </p>
                     </div>
                     {getStatusBadge(appointment.status)}
@@ -318,8 +327,8 @@ export default function MyAppointments({ onBack }: MyAppointmentsProps) {
               Atenção!
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Cancelar no dia da consulta resultará em <strong>bloqueio de 60 dias para esta especialidade</strong>.
-              Você poderá agendar outras especialidades normalmente. Tem certeza que deseja continuar?
+              Cancelar no dia da consulta resultará em <strong>suspensão de 60 dias</strong>.
+              Tem certeza que deseja continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

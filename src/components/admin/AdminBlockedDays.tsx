@@ -15,7 +15,7 @@ import { ptBR } from 'date-fns/locale';
 interface BlockedDay {
   id: string;
   professional_id: string | null;
-  date: string;
+  blocked_date: string;
   reason: string | null;
   professionals: { name: string } | null;
 }
@@ -23,7 +23,6 @@ interface BlockedDay {
 interface Professional {
   id: string;
   name: string;
-  specialty: string;
 }
 
 export default function AdminBlockedDays() {
@@ -34,7 +33,7 @@ export default function AdminBlockedDays() {
   const [showDialog, setShowDialog] = useState(false);
   const [formData, setFormData] = useState({
     professional_id: 'all',
-    date: '',
+    blocked_date: '',
     reason: ''
   });
 
@@ -47,7 +46,7 @@ export default function AdminBlockedDays() {
     const { data, error } = await supabase
       .from('blocked_days')
       .select(`*, professionals (name)`)
-      .order('date', { ascending: false });
+      .order('blocked_date', { ascending: false });
 
     if (data && !error) {
       setBlockedDays(data as unknown as BlockedDay[]);
@@ -56,24 +55,24 @@ export default function AdminBlockedDays() {
   };
 
   const fetchProfessionals = async () => {
-    const { data } = await supabase.from('professionals').select('id, name, specialty');
+    const { data } = await supabase.from('professionals').select('id, name');
     if (data) setProfessionals(data);
   };
 
   const handleNew = () => {
-    setFormData({ professional_id: 'all', date: '', reason: '' });
+    setFormData({ professional_id: 'all', blocked_date: '', reason: '' });
     setShowDialog(true);
   };
 
   const handleSave = async () => {
-    if (!formData.date) {
+    if (!formData.blocked_date) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Data é obrigatória.' });
       return;
     }
 
     const { error } = await supabase.from('blocked_days').insert({
       professional_id: formData.professional_id === 'all' ? null : formData.professional_id,
-      date: formData.date,
+      blocked_date: formData.blocked_date,
       reason: formData.reason || null
     });
 
@@ -138,7 +137,7 @@ export default function AdminBlockedDays() {
                 blockedDays.map(day => (
                   <TableRow key={day.id}>
                     <TableCell className="font-medium">
-                      {format(parseISO(day.date), "EEEE, dd 'de' MMMM", { locale: ptBR })}
+                      {format(parseISO(day.blocked_date), "EEEE, dd 'de' MMMM", { locale: ptBR })}
                     </TableCell>
                     <TableCell>
                       {day.professionals?.name || (
@@ -193,8 +192,8 @@ export default function AdminBlockedDays() {
               <Label>Data</Label>
               <Input
                 type="date"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                value={formData.blocked_date}
+                onChange={(e) => setFormData({ ...formData, blocked_date: e.target.value })}
               />
             </div>
             <div className="space-y-2">

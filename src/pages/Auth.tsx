@@ -8,7 +8,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar, UserPlus, LogIn, Loader2 } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { z } from 'zod';
 
 const loginSchema = z.object({
@@ -20,26 +19,12 @@ const registerSchema = z.object({
   name: z.string().min(2, 'Nome deve ter no mínimo 2 caracteres').max(100),
   email: z.string().email('Email inválido').max(255),
   password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres'),
-  department: z.string().min(1, 'Selecione um departamento'),
 });
-
-const DEPARTMENTS = [
-  'Administração',
-  'Financeiro',
-  'Recursos Humanos',
-  'Marketing',
-  'Adesão/Comercial',
-  'Produção/Operações',
-  'Logística',
-  'Tecnologia da Informação',
-  'Jurídico',
-  'Atendimento ao Cliente',
-] as const;
 
 export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: '', password: '' });
-  const [registerData, setRegisterData] = useState({ name: '', email: '', password: '', department: '' });
+  const [registerData, setRegisterData] = useState({ name: '', email: '', password: '' });
   const { signIn, signUp, user, loading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -71,9 +56,7 @@ export default function Auth() {
       toast({
         variant: 'destructive',
         title: 'Erro ao entrar',
-        description: error.message === 'Credenciais inválidas' 
-          ? 'Email ou senha incorretos' 
-          : error.message,
+        description: error.message,
       });
     } else {
       navigate('/dashboard');
@@ -94,18 +77,14 @@ export default function Auth() {
     }
 
     setIsLoading(true);
-    const { error } = await signUp(registerData.email, registerData.password, registerData.name, registerData.department);
+    const { error } = await signUp(registerData.email, registerData.password, registerData.name);
     setIsLoading(false);
 
     if (error) {
-      let message = error.message;
-      if (error.message.includes('já cadastrado') || error.message.includes('already registered')) {
-        message = 'Este email já está cadastrado';
-      }
       toast({
         variant: 'destructive',
         title: 'Erro ao cadastrar',
-        description: message,
+        description: error.message,
       });
     } else {
       toast({
@@ -215,24 +194,6 @@ export default function Auth() {
                       onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                       required
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="register-department">Departamento</Label>
-                    <Select
-                      value={registerData.department}
-                      onValueChange={(value) => setRegisterData({ ...registerData, department: value })}
-                    >
-                      <SelectTrigger id="register-department">
-                        <SelectValue placeholder="Selecione o departamento" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DEPARTMENTS.map((dept) => (
-                          <SelectItem key={dept} value={dept}>
-                            {dept}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                   <Button type="submit" className="w-full gradient-primary" disabled={isLoading}>
                     {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Criar conta'}

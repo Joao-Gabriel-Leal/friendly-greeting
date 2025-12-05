@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,18 +11,18 @@ import { isBrazilianHoliday } from '@/lib/brazilianHolidays';
 
 interface DateSelectorProps {
   professionalId: string;
+  specialtyId: string;
   specialty: string;
   onSelect: (date: Date) => void;
   onBack: () => void;
 }
 
-export default function DateSelector({ professionalId, specialty, onSelect, onBack }: DateSelectorProps) {
+export default function DateSelector({ professionalId, specialtyId, specialty, onSelect, onBack }: DateSelectorProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [availableDays, setAvailableDays] = useState<Date[]>([]);
-  const [blockedDays, setBlockedDays] = useState<Date[]>([]);
+  const [availableDays, setAvailableDays] = useState<number[]>([]);
+  const [blockedDates, setBlockedDates] = useState<Date[]>([]);
   const [existingAppointment, setExistingAppointment] = useState<{ id: string; date: string } | null>(null);
-  const [specialtyBlocked, setSpecialtyBlocked] = useState<Date | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
 
   useEffect(() => {
@@ -30,39 +30,38 @@ export default function DateSelector({ professionalId, specialty, onSelect, onBa
       setLoading(true);
       await Promise.all([
         fetchAvailability(),
-        checkExistingAppointment(),
-        checkSpecialtyBlock()
+        checkExistingAppointment()
       ]);
       setLoading(false);
     };
     loadData();
-  }, [professionalId, specialty]);
+  }, [professionalId, specialtyId]);
 
   const fetchAvailability = async () => {
     const today = startOfDay(new Date());
     const maxDate = addDays(today, 30);
 
     try {
-      // Fetch available days marked by admin
-      const available = await api.getAvailableDays(
-        professionalId,
-        format(today, 'yyyy-MM-dd'),
-        format(maxDate, 'yyyy-MM-dd')
-      );
+      // Fetch available days of week for the professional
+      const { data: availableData } = await supabase
+        .from('available_days')
+        .select('day_of_week')
+        .eq('professional_id', professionalId);
 
-      // Fetch blocked days
-      const blocked = await api.getBlockedDays(
-        professionalId,
-        format(today, 'yyyy-MM-dd'),
-        format(maxDate, 'yyyy-MM-dd')
-      );
-
-      if (available) {
-        setAvailableDays(available.map((d: any) => new Date(d.date + 'T12:00:00')));
+      if (availableData) {
+        setAvailableDays(availableData.map(d => d.day_of_week));
       }
 
-      if (blocked) {
-        setBlockedDays(blocked.map((d: any) => new Date(d.date + 'T12:00:00')));
+      // Fetch blocked dates
+      const { data: blockedData } = await supabase
+        .from('blocked_days')
+        .select('blocked_date')
+        .or(`professional_id.eq.${professionalId},professional_id.is.null`)
+        .gte('blocked_date', format(today, 'yyyy-MM-dd'))
+        .lte('blocked_date', format(maxDate, 'yyyy-MM-dd'));
+
+      if (blockedData) {
+        setBlockedDates(blockedData.map(d => new Date(d.blocked_date + 'T12:00:00')));
       }
     } catch (error) {
       console.error('Error fetching availability:', error);
@@ -73,40 +72,25 @@ export default function DateSelector({ professionalId, specialty, onSelect, onBa
     if (!user) return;
 
     try {
-      const appointments = await api.getMyAppointments();
       const today = new Date();
       const monthStart = startOfMonth(today);
       const monthEnd = endOfMonth(today);
 
-      const existing = appointments.find((apt: any) => 
-        apt.procedure === specialty &&
-        ['scheduled', 'completed'].includes(apt.status) &&
-        new Date(apt.date) >= monthStart &&
-        new Date(apt.date) <= monthEnd
-      );
+      const { data } = await supabase
+        .from('appointments')
+        .select('id, appointment_date')
+        .eq('user_id', user.id)
+        .eq('specialty_id', specialtyId)
+        .in('status', ['scheduled', 'completed'])
+        .gte('appointment_date', format(monthStart, 'yyyy-MM-dd'))
+        .lte('appointment_date', format(monthEnd, 'yyyy-MM-dd'))
+        .maybeSingle();
 
-      if (existing) {
-        setExistingAppointment({ id: existing.id, date: existing.date });
+      if (data) {
+        setExistingAppointment({ id: data.id, date: data.appointment_date });
       }
     } catch (error) {
       console.error('Error checking existing appointment:', error);
-    }
-  };
-
-  const checkSpecialtyBlock = async () => {
-    if (!user) return;
-
-    try {
-      const blocks = await api.getSpecialtyBlocks(user.id);
-      const block = blocks.find((b: any) => 
-        b.specialty === specialty && new Date(b.blocked_until) > new Date()
-      );
-
-      if (block) {
-        setSpecialtyBlocked(new Date(block.blocked_until));
-      }
-    } catch (error) {
-      console.error('Error checking specialty block:', error);
     }
   };
 
@@ -118,15 +102,20 @@ export default function DateSelector({ professionalId, specialty, onSelect, onBa
     if (normalizedDate < today || normalizedDate > maxDate) return false;
 
     const dayOfWeek = date.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+    
+    // If available days are configured, check if this day is allowed
+    if (availableDays.length > 0 && !availableDays.includes(dayOfWeek)) {
+      return false;
+    }
+
+    // Default: exclude weekends if no availability configured
+    if (availableDays.length === 0 && (dayOfWeek === 0 || dayOfWeek === 6)) {
+      return false;
+    }
 
     if (isBrazilianHoliday(date)) return false;
 
-    if (blockedDays.some(blocked => isSameDay(blocked, date))) return false;
-
-    if (availableDays.length > 0) {
-      return availableDays.some(available => isSameDay(available, date));
-    }
+    if (blockedDates.some(blocked => isSameDay(blocked, date))) return false;
 
     return true;
   };
@@ -141,35 +130,6 @@ export default function DateSelector({ professionalId, specialty, onSelect, onBa
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (specialtyBlocked) {
-    return (
-      <div className="max-w-md mx-auto animate-fade-in">
-        <Button variant="ghost" onClick={onBack} className="mb-6">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Voltar
-        </Button>
-
-        <Card className="border-destructive">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-destructive/10 flex items-center justify-center mb-4">
-              <AlertCircle className="h-8 w-8 text-destructive" />
-            </div>
-            <CardTitle>Especialidade Bloqueada</CardTitle>
-            <CardDescription>
-              Você está temporariamente impedido de agendar <strong>{specialty}</strong> até{' '}
-              {format(specialtyBlocked, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-sm text-muted-foreground">
-              Entre em contato com a administração para mais informações.
-            </p>
-          </CardContent>
-        </Card>
       </div>
     );
   }
