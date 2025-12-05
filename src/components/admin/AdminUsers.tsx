@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Edit, Trash2, Ban, CheckCircle, Search, KeyRound } from 'lucide-react';
+import { Loader2, Edit, Ban, CheckCircle, Search, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -121,18 +121,6 @@ export default function AdminUsers() {
     }
   };
 
-  const handleDelete = async (user: User) => {
-    if (!confirm('Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.')) return;
-
-    const { error } = await supabase.from('profiles').delete().eq('id', user.id);
-
-    if (error) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível excluir o usuário.' });
-    } else {
-      toast({ title: 'Sucesso', description: 'Usuário excluído com sucesso.' });
-      fetchUsers();
-    }
-  };
 
   const handleChangePassword = (user: User) => {
     setEditingUser(user);
@@ -284,15 +272,6 @@ export default function AdminUsers() {
                             <Ban className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="text-destructive"
-                          onClick={() => handleDelete(user)}
-                          title="Excluir usuário"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
