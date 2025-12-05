@@ -240,6 +240,7 @@ export type Database = {
           id: string
           name: string
           phone: string | null
+          setor: string | null
           suspended_until: string | null
           updated_at: string
           user_id: string
@@ -251,6 +252,7 @@ export type Database = {
           id?: string
           name: string
           phone?: string | null
+          setor?: string | null
           suspended_until?: string | null
           updated_at?: string
           user_id: string
@@ -262,6 +264,7 @@ export type Database = {
           id?: string
           name?: string
           phone?: string | null
+          setor?: string | null
           suspended_until?: string | null
           updated_at?: string
           user_id?: string

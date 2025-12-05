@@ -9,6 +9,7 @@ interface Profile {
   email: string;
   phone: string | null;
   cpf: string | null;
+  setor: string | null;
   suspended_until: string | null;
   created_at: string;
   updated_at: string;
@@ -20,7 +21,7 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, name: string, setor: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isSuspended: boolean;
@@ -118,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, name: string) => {
+  const signUp = async (email: string, password: string, name: string, setor: string) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       
@@ -129,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           emailRedirectTo: redirectUrl,
           data: {
             name: name,
+            setor: setor,
           }
         }
       });
