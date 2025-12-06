@@ -5,12 +5,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Edit, Ban, CheckCircle, Search, KeyRound } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Loader2, Edit, Ban, CheckCircle, Search, KeyRound, MoreVertical, ShieldOff, Clock, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { emailService } from '@/lib/emailService';
 
 interface User {
   id: string;
@@ -19,23 +22,41 @@ interface User {
   email: string;
   phone: string | null;
   suspended_until: string | null;
+  blocked: boolean;
   created_at: string;
   role: 'user' | 'admin';
+}
+
+interface Specialty {
+  id: string;
+  name: string;
+}
+
+interface SpecialtyBlock {
+  id: string;
+  specialty_id: string;
+  blocked_until: string | null;
 }
 
 export default function AdminUsers() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [showSuspendDialog, setShowSuspendDialog] = useState(false);
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', role: 'user' as 'user' | 'admin' });
   const [newPassword, setNewPassword] = useState('');
+  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+  const [blockReason, setBlockReason] = useState('');
 
   useEffect(() => {
     fetchUsers();
+    fetchSpecialties();
   }, []);
 
   const fetchUsers = async () => {
@@ -45,7 +66,6 @@ export default function AdminUsers() {
       .order('created_at', { ascending: false });
 
     if (profilesData && !profilesError) {
-      // Fetch roles for all users
       const userIds = profilesData.map(p => p.user_id);
       const { data: rolesData } = await supabase
         .from('user_roles')
@@ -56,12 +76,18 @@ export default function AdminUsers() {
 
       const usersWithRoles = profilesData.map(user => ({
         ...user,
+        blocked: user.blocked || false,
         role: (rolesMap.get(user.user_id) || 'user') as 'user' | 'admin'
       }));
 
       setUsers(usersWithRoles);
     }
     setLoading(false);
+  };
+
+  const fetchSpecialties = async () => {
+    const { data } = await supabase.from('specialties').select('id, name').eq('active', true);
+    setSpecialties(data || []);
   };
 
   const handleEdit = (user: User) => {
@@ -83,7 +109,6 @@ export default function AdminUsers() {
       return;
     }
 
-    // Update role in user_roles table
     const { error: roleError } = await supabase
       .from('user_roles')
       .upsert({ 
@@ -100,28 +125,6 @@ export default function AdminUsers() {
     setShowDialog(false);
   };
 
-  const handleSuspend = async (user: User, suspend: boolean) => {
-    const suspendedUntil = suspend 
-      ? new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString() 
-      : null;
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ suspended_until: suspendedUntil })
-      .eq('id', user.id);
-
-    if (error) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar a suspensão.' });
-    } else {
-      toast({ 
-        title: 'Sucesso', 
-        description: suspend ? 'Usuário suspenso por 60 dias.' : 'Suspensão removida.' 
-      });
-      fetchUsers();
-    }
-  };
-
-
   const handleChangePassword = (user: User) => {
     setEditingUser(user);
     setNewPassword('');
@@ -130,30 +133,17 @@ export default function AdminUsers() {
 
   const handleSavePassword = async () => {
     if (!editingUser || newPassword.length < 6) {
-      toast({ 
-        variant: 'destructive', 
-        title: 'Erro', 
-        description: 'A senha deve ter no mínimo 6 caracteres.' 
-      });
+      toast({ variant: 'destructive', title: 'Erro', description: 'A senha deve ter no mínimo 6 caracteres.' });
       return;
     }
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
       const response = await supabase.functions.invoke('admin-update-password', {
-        body: {
-          userId: editingUser.user_id,
-          newPassword: newPassword,
-        },
+        body: { userId: editingUser.user_id, newPassword },
       });
 
       if (response.error) {
-        toast({ 
-          variant: 'destructive', 
-          title: 'Erro', 
-          description: response.error.message || 'Não foi possível alterar a senha.' 
-        });
+        toast({ variant: 'destructive', title: 'Erro', description: response.error.message || 'Não foi possível alterar a senha.' });
       } else {
         toast({ title: 'Sucesso', description: 'Senha alterada com sucesso.' });
         setShowPasswordDialog(false);
@@ -161,12 +151,167 @@ export default function AdminUsers() {
       }
     } catch (error) {
       console.error('Error updating password:', error);
-      toast({ 
-        variant: 'destructive', 
-        title: 'Erro', 
-        description: 'Erro ao alterar a senha. Tente novamente.' 
-      });
+      toast({ variant: 'destructive', title: 'Erro', description: 'Erro ao alterar a senha. Tente novamente.' });
     }
+  };
+
+  const handleOpenSuspendDialog = (user: User) => {
+    setEditingUser(user);
+    setSelectedSpecialties([]);
+    setShowSuspendDialog(true);
+  };
+
+  const handleSuspendBySpecialty = async () => {
+    if (!editingUser) return;
+
+    const suspendedUntil = addMonths(new Date(), 2).toISOString();
+
+    if (selectedSpecialties.length === 0) {
+      // Suspender conta inteira
+      const { error } = await supabase
+        .from('profiles')
+        .update({ suspended_until: suspendedUntil })
+        .eq('id', editingUser.id);
+
+      if (error) {
+        toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível suspender a conta.' });
+        return;
+      }
+
+      // Enviar e-mail
+      await emailService.sendSuspensionEmail({
+        userEmail: editingUser.email,
+        userName: editingUser.name,
+        reason: 'Suspensão aplicada pela administração',
+        suspendedUntil,
+      });
+
+      toast({ title: 'Sucesso', description: 'Conta suspensa por 2 meses.' });
+    } else {
+      // Suspender especialidades específicas
+      for (const specId of selectedSpecialties) {
+        const { error } = await supabase
+          .from('user_specialty_blocks')
+          .upsert({
+            user_id: editingUser.user_id,
+            specialty_id: specId,
+            blocked_until: suspendedUntil,
+            reason: 'Suspensão aplicada pela administração',
+          }, { onConflict: 'user_id,specialty_id' });
+
+        if (error) {
+          console.error('Error blocking specialty:', error);
+        }
+      }
+
+      const specNames = specialties
+        .filter(s => selectedSpecialties.includes(s.id))
+        .map(s => s.name)
+        .join(', ');
+
+      // Enviar e-mail
+      await emailService.sendSuspensionEmail({
+        userEmail: editingUser.email,
+        userName: editingUser.name,
+        reason: 'Suspensão de especialidade aplicada pela administração',
+        suspendedUntil,
+        specialty: specNames,
+      });
+
+      toast({ title: 'Sucesso', description: `Especialidades suspensas: ${specNames}` });
+    }
+
+    fetchUsers();
+    setShowSuspendDialog(false);
+  };
+
+  const handleRemoveSuspension = async (user: User) => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ suspended_until: null })
+      .eq('id', user.id);
+
+    if (error) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível remover a suspensão.' });
+      return;
+    }
+
+    // Remover bloqueios de especialidades também
+    await supabase
+      .from('user_specialty_blocks')
+      .delete()
+      .eq('user_id', user.user_id);
+
+    // Enviar e-mail de reativação
+    await emailService.sendSuspensionLiftedEmail({
+      userEmail: user.email,
+      userName: user.name,
+      liftedByAdmin: true,
+    });
+
+    toast({ title: 'Sucesso', description: 'Suspensão removida com sucesso.' });
+    fetchUsers();
+  };
+
+  const handleOpenBlockDialog = (user: User) => {
+    setEditingUser(user);
+    setBlockReason('');
+    setShowBlockDialog(true);
+  };
+
+  const handleBlockAccount = async () => {
+    if (!editingUser) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ blocked: true })
+      .eq('id', editingUser.id);
+
+    if (error) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível bloquear a conta.' });
+      return;
+    }
+
+    // Enviar e-mail
+    await emailService.sendAccountBlockedEmail({
+      userEmail: editingUser.email,
+      userName: editingUser.name,
+      reason: blockReason || 'Decisão administrativa',
+    });
+
+    toast({ title: 'Sucesso', description: 'Conta bloqueada com sucesso.' });
+    fetchUsers();
+    setShowBlockDialog(false);
+  };
+
+  const handleUnblockAccount = async (user: User) => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ blocked: false })
+      .eq('id', user.id);
+
+    if (error) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível desbloquear a conta.' });
+      return;
+    }
+
+    // Enviar e-mail de reativação
+    await emailService.sendSuspensionLiftedEmail({
+      userEmail: user.email,
+      userName: user.name,
+      liftedByAdmin: true,
+    });
+
+    toast({ title: 'Sucesso', description: 'Conta desbloqueada com sucesso.' });
+    fetchUsers();
+  };
+
+  const toggleSpecialtySelection = (specId: string) => {
+    setSelectedSpecialties(prev => 
+      prev.includes(specId) 
+        ? prev.filter(id => id !== specId)
+        : [...prev, specId]
+    );
   };
 
   const filteredUsers = users.filter(user =>
@@ -212,6 +357,7 @@ export default function AdminUsers() {
             <TableBody>
               {filteredUsers.map(user => {
                 const isSuspended = user.suspended_until && new Date(user.suspended_until) > new Date();
+                const isBlocked = user.blocked;
                 
                 return (
                   <TableRow key={user.id}>
@@ -227,8 +373,12 @@ export default function AdminUsers() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      {isSuspended ? (
-                        <span className="text-destructive text-sm">
+                      {isBlocked ? (
+                        <span className="text-destructive text-sm font-medium flex items-center gap-1">
+                          <Lock className="h-3 w-3" /> Bloqueado
+                        </span>
+                      ) : isSuspended ? (
+                        <span className="text-warning text-sm">
                           Suspenso até {format(parseISO(user.suspended_until!), 'dd/MM/yyyy')}
                         </span>
                       ) : (
@@ -239,40 +389,50 @@ export default function AdminUsers() {
                       {format(parseISO(user.created_at), 'dd/MM/yyyy', { locale: ptBR })}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleEdit(user)} title="Editar">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleChangePassword(user)} 
-                          title="Alterar senha"
-                        >
-                          <KeyRound className="h-4 w-4 text-blue-500" />
-                        </Button>
-                        {isSuspended ? (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="text-success"
-                            onClick={() => handleSuspend(user, false)}
-                            title="Reativar usuário"
-                          >
-                            <CheckCircle className="h-4 w-4" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="h-4 w-4" />
                           </Button>
-                        ) : (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="text-warning"
-                            onClick={() => handleSuspend(user, true)}
-                            title="Suspender conta"
-                          >
-                            <Ban className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleChangePassword(user)}>
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            Alterar senha
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleEdit(user)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {isSuspended ? (
+                            <DropdownMenuItem onClick={() => handleRemoveSuspension(user)}>
+                              <CheckCircle className="h-4 w-4 mr-2 text-success" />
+                              Remover suspensão
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => handleOpenSuspendDialog(user)}>
+                              <Clock className="h-4 w-4 mr-2 text-warning" />
+                              Suspender por 2 meses
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          {isBlocked ? (
+                            <DropdownMenuItem onClick={() => handleUnblockAccount(user)}>
+                              <ShieldOff className="h-4 w-4 mr-2 text-success" />
+                              Desbloquear conta
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem 
+                              onClick={() => handleOpenBlockDialog(user)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Ban className="h-4 w-4 mr-2" />
+                              Bloquear conta
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -282,6 +442,7 @@ export default function AdminUsers() {
         </CardContent>
       </Card>
 
+      {/* Dialog Editar Usuário */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent>
           <DialogHeader>
@@ -319,6 +480,7 @@ export default function AdminUsers() {
         </DialogContent>
       </Dialog>
 
+      {/* Dialog Alterar Senha */}
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
         <DialogContent>
           <DialogHeader>
@@ -340,8 +502,74 @@ export default function AdminUsers() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPasswordDialog(false)}>Cancelar</Button>
-            <Button onClick={handleSavePassword} className="gradient-primary">
-              Alterar Senha
+            <Button onClick={handleSavePassword} className="gradient-primary">Alterar Senha</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Suspender por Especialidade */}
+      <Dialog open={showSuspendDialog} onOpenChange={setShowSuspendDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Suspender Conta</DialogTitle>
+            <DialogDescription>
+              Suspender <strong>{editingUser?.name}</strong> por 2 meses.
+              Selecione especialidades específicas ou deixe em branco para suspender a conta inteira.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Label>Especialidades a suspender (opcional)</Label>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {specialties.map(spec => (
+                <div key={spec.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={spec.id}
+                    checked={selectedSpecialties.includes(spec.id)}
+                    onCheckedChange={() => toggleSpecialtySelection(spec.id)}
+                  />
+                  <label htmlFor={spec.id} className="text-sm cursor-pointer">{spec.name}</label>
+                </div>
+              ))}
+            </div>
+            {selectedSpecialties.length === 0 && (
+              <p className="text-sm text-muted-foreground bg-muted p-2 rounded">
+                Nenhuma especialidade selecionada = suspensão total da conta
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSuspendDialog(false)}>Cancelar</Button>
+            <Button onClick={handleSuspendBySpecialty} variant="destructive">
+              Suspender
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Bloquear Conta */}
+      <Dialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bloquear Conta</DialogTitle>
+            <DialogDescription>
+              Ao bloquear, <strong>{editingUser?.name}</strong> não conseguirá acessar o sistema e verá a mensagem "Conta bloqueada. Contate os administradores."
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Motivo do bloqueio (opcional)</Label>
+              <Input
+                placeholder="Ex: Uso indevido do sistema"
+                value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBlockDialog(false)}>Cancelar</Button>
+            <Button onClick={handleBlockAccount} variant="destructive">
+              <Ban className="h-4 w-4 mr-2" />
+              Bloquear Conta
             </Button>
           </DialogFooter>
         </DialogContent>

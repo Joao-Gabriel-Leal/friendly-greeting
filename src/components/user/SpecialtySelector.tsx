@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, Loader2, Heart, Brain, Apple } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
+import { getSpecialtyIcon, getSpecialtyColor } from '@/lib/specialtyIcons';
 
 interface Specialty {
   id: string;
@@ -14,18 +15,6 @@ interface SpecialtySelectorProps {
   onSelect: (specialty: string, specialtyId: string, professionalId: string, professionalName: string) => void;
   onBack: () => void;
 }
-
-const specialtyIcons: Record<string, React.ReactNode> = {
-  'Massagem': <Heart className="h-8 w-8" />,
-  'Psicologia': <Brain className="h-8 w-8" />,
-  'Nutrição': <Apple className="h-8 w-8" />,
-};
-
-const specialtyColors: Record<string, string> = {
-  'Massagem': 'from-rose-500 to-pink-500',
-  'Psicologia': 'from-violet-500 to-purple-500',
-  'Nutrição': 'from-emerald-500 to-green-500',
-};
 
 export default function SpecialtySelector({ onSelect, onBack }: SpecialtySelectorProps) {
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
@@ -91,8 +80,8 @@ export default function SpecialtySelector({ onSelect, onBack }: SpecialtySelecto
           >
             <CardContent className="p-0">
               <div className="flex items-center">
-                <div className={`w-24 h-24 bg-gradient-to-br ${specialtyColors[spec.name] || 'from-gray-500 to-gray-600'} flex items-center justify-center text-white`}>
-                  {specialtyIcons[spec.name] || <Heart className="h-8 w-8" />}
+                <div className={`w-24 h-24 bg-gradient-to-br ${getSpecialtyColor(spec.name)} flex items-center justify-center text-white`}>
+                  {getSpecialtyIcon(spec.name)}
                 </div>
                 <div className="p-6 flex-1">
                   <h3 className="text-xl font-semibold text-foreground">{spec.name}</h3>

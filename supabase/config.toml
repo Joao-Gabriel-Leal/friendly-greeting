@@ -1,1 +1,40 @@
 project_id = "ekgosdesyvrndzzbhmlx"
+
+[functions.admin-update-password]
+verify_jwt = true
+
+[functions.apply-specialty-block]
+verify_jwt = true
+
+[functions.get-booked-slots]
+verify_jwt = false
+
+[functions.send-confirmation-email]
+verify_jwt = true
+
+[functions.send-cancellation-email]
+verify_jwt = true
+
+[functions.send-suspension-email]
+verify_jwt = true
+
+[functions.send-suspension-lifted-email]
+verify_jwt = true
+
+[functions.send-reminder-email]
+verify_jwt = true
+
+[functions.send-reschedule-email]
+verify_jwt = true
+
+[functions.send-feedback-email]
+verify_jwt = true
+
+[functions.send-welcome-email]
+verify_jwt = true
+
+[functions.send-noshow-email]
+verify_jwt = true
+
+[functions.send-account-blocked-email]
+verify_jwt = true
