@@ -234,6 +234,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          blocked: boolean | null
           cpf: string | null
           created_at: string
           email: string
@@ -246,6 +247,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          blocked?: boolean | null
           cpf?: string | null
           created_at?: string
           email: string
@@ -258,6 +260,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          blocked?: boolean | null
           cpf?: string | null
           created_at?: string
           email?: string
@@ -315,6 +318,44 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      user_specialty_blocks: {
+        Row: {
+          blocked_until: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          reason: string | null
+          specialty_id: string
+          user_id: string
+        }
+        Insert: {
+          blocked_until?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason?: string | null
+          specialty_id: string
+          user_id: string
+        }
+        Update: {
+          blocked_until?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason?: string | null
+          specialty_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_specialty_blocks_specialty_id_fkey"
+            columns: ["specialty_id"]
+            isOneToOne: false
+            referencedRelation: "specialties"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

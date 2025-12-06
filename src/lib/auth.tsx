@@ -11,6 +11,7 @@ interface Profile {
   cpf: string | null;
   setor: string | null;
   suspended_until: string | null;
+  blocked: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isSuspended: boolean;
+  isBlocked: boolean;
   suspendedUntil: Date | null;
   refreshProfile: () => Promise<void>;
 }
@@ -51,7 +53,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      setProfile(profileData);
+      setProfile({
+        ...profileData,
+        blocked: profileData?.blocked || false,
+      });
 
       // Check if user is admin
       const { data: roleData } = await supabase
@@ -113,6 +118,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: new Error(error.message === 'Invalid login credentials' ? 'Email ou senha incorretos' : error.message) };
       }
 
+      // Check if account is blocked
+      if (data.user) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('blocked')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
+        if (profileData?.blocked) {
+          // Sign out immediately
+          await supabase.auth.signOut();
+          return { error: new Error('Conta bloqueada. Contate os administradores.') };
+        }
+      }
+
       return { error: null };
     } catch (error) {
       return { error: error as Error };
@@ -164,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const suspendedUntil = profile?.suspended_until ? new Date(profile.suspended_until) : null;
   const isSuspended = suspendedUntil ? suspendedUntil > new Date() : false;
+  const isBlocked = profile?.blocked || false;
 
   return (
     <AuthContext.Provider value={{
@@ -176,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       isAdmin,
       isSuspended,
+      isBlocked,
       suspendedUntil,
       refreshProfile
     }}>
