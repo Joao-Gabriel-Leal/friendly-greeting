@@ -24,6 +24,7 @@ interface AppointmentReport {
   userName: string;
   userEmail: string;
   userStatus: string;
+  userDepartment: string;
   date: string;
   time: string;
   specialty: string;
@@ -129,7 +130,7 @@ export default function AdminReports() {
 
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('user_id, name, email, suspended_until')
+      .select('user_id, name, email, suspended_until, setor')
       .in('user_id', userIds);
 
     const { data: professionals } = await supabase
@@ -159,6 +160,7 @@ export default function AdminReports() {
         userName: profile?.name || 'N/A',
         userEmail: profile?.email || 'N/A',
         userStatus,
+        userDepartment: profile?.setor || 'N/A',
         date: a.appointment_date,
         time: a.appointment_time,
         specialty: specialtiesMap.get(a.specialty_id) || 'N/A',
@@ -184,6 +186,7 @@ export default function AdminReports() {
     const data = appointmentReports.map(r => ({
       'Nome do Usuário': r.userName,
       'Email': r.userEmail,
+      'Departamento': r.userDepartment,
       'Status do Usuário': r.userStatus,
       'Data': format(parseISO(r.date), 'dd/MM/yyyy'),
       'Horário': r.time.slice(0, 5),
@@ -368,6 +371,7 @@ export default function AdminReports() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
+                  <TableHead>Departamento</TableHead>
                   <TableHead>Status Usuário</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Horário</TableHead>
@@ -380,6 +384,7 @@ export default function AdminReports() {
                 {appointmentReports.slice(0, 50).map((report) => (
                   <TableRow key={report.id}>
                     <TableCell className="font-medium">{report.userName}</TableCell>
+                    <TableCell className="text-muted-foreground">{report.userDepartment}</TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         report.userStatus === 'Suspenso' 

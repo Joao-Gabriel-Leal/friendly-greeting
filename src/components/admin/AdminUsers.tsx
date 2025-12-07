@@ -9,11 +9,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Edit, Ban, CheckCircle, Search, KeyRound, MoreVertical, ShieldOff, Clock, Lock } from 'lucide-react';
+import { Loader2, Edit, Ban, CheckCircle, Search, KeyRound, MoreVertical, ShieldOff, Clock, Lock, Building2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { emailService } from '@/lib/emailService';
+
+const DEPARTMENTS = [
+  'Administração',
+  'Financeiro', 
+  'Recursos Humanos',
+  'Produção',
+  'Comercial',
+  'Marketing',
+  'Logística',
+  'Tecnologia da Informação'
+];
 
 interface User {
   id: string;
@@ -21,21 +32,16 @@ interface User {
   name: string;
   email: string;
   phone: string | null;
+  setor: string | null;
   suspended_until: string | null;
   blocked: boolean;
   created_at: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'professional';
 }
 
 interface Specialty {
   id: string;
   name: string;
-}
-
-interface SpecialtyBlock {
-  id: string;
-  specialty_id: string;
-  blocked_until: string | null;
 }
 
 export default function AdminUsers() {
@@ -49,10 +55,11 @@ export default function AdminUsers() {
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [showSuspendDialog, setShowSuspendDialog] = useState(false);
   const [showBlockDialog, setShowBlockDialog] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', role: 'user' as 'user' | 'admin' });
+  const [formData, setFormData] = useState({ name: '', email: '', role: 'user' as 'user' | 'admin' | 'professional', setor: '' });
   const [newPassword, setNewPassword] = useState('');
   const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
   const [blockReason, setBlockReason] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -77,7 +84,7 @@ export default function AdminUsers() {
       const usersWithRoles = profilesData.map(user => ({
         ...user,
         blocked: user.blocked || false,
-        role: (rolesMap.get(user.user_id) || 'user') as 'user' | 'admin'
+        role: (rolesMap.get(user.user_id) || 'user') as 'user' | 'admin' | 'professional'
       }));
 
       setUsers(usersWithRoles);
@@ -92,37 +99,47 @@ export default function AdminUsers() {
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
-    setFormData({ name: user.name, email: user.email, role: user.role });
+    setFormData({ name: user.name, email: user.email, role: user.role, setor: user.setor || '' });
     setShowDialog(true);
   };
 
   const handleSave = async () => {
     if (!editingUser) return;
+    setSaving(true);
 
+    // Update profile (including setor/department)
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ name: formData.name })
+      .update({ name: formData.name, setor: formData.setor || null })
       .eq('id', editingUser.id);
 
     if (profileError) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível atualizar o usuário.' });
+      setSaving(false);
       return;
     }
 
+    // Update role - first delete existing, then insert new
+    await supabase
+      .from('user_roles')
+      .delete()
+      .eq('user_id', editingUser.user_id);
+
     const { error: roleError } = await supabase
       .from('user_roles')
-      .upsert({ 
+      .insert({ 
         user_id: editingUser.user_id, 
         role: formData.role 
-      }, { onConflict: 'user_id,role' });
+      });
 
     if (roleError) {
       console.error('Error updating role:', roleError);
     }
 
-    toast({ title: 'Sucesso', description: 'Usuário atualizado com sucesso.' });
+    toast({ title: 'Sucesso', description: 'Usuário atualizado com sucesso. As permissões foram atualizadas.' });
     fetchUsers();
     setShowDialog(false);
+    setSaving(false);
   };
 
   const handleChangePassword = (user: User) => {
@@ -167,7 +184,6 @@ export default function AdminUsers() {
     const suspendedUntil = addMonths(new Date(), 2).toISOString();
 
     if (selectedSpecialties.length === 0) {
-      // Suspender conta inteira
       const { error } = await supabase
         .from('profiles')
         .update({ suspended_until: suspendedUntil })
@@ -178,7 +194,6 @@ export default function AdminUsers() {
         return;
       }
 
-      // Enviar e-mail
       await emailService.sendSuspensionEmail({
         userEmail: editingUser.email,
         userName: editingUser.name,
@@ -188,7 +203,6 @@ export default function AdminUsers() {
 
       toast({ title: 'Sucesso', description: 'Conta suspensa por 2 meses.' });
     } else {
-      // Suspender especialidades específicas
       for (const specId of selectedSpecialties) {
         const { error } = await supabase
           .from('user_specialty_blocks')
@@ -209,7 +223,6 @@ export default function AdminUsers() {
         .map(s => s.name)
         .join(', ');
 
-      // Enviar e-mail
       await emailService.sendSuspensionEmail({
         userEmail: editingUser.email,
         userName: editingUser.name,
@@ -236,13 +249,11 @@ export default function AdminUsers() {
       return;
     }
 
-    // Remover bloqueios de especialidades também
     await supabase
       .from('user_specialty_blocks')
       .delete()
       .eq('user_id', user.user_id);
 
-    // Enviar e-mail de reativação
     await emailService.sendSuspensionLiftedEmail({
       userEmail: user.email,
       userName: user.name,
@@ -272,7 +283,6 @@ export default function AdminUsers() {
       return;
     }
 
-    // Enviar e-mail
     await emailService.sendAccountBlockedEmail({
       userEmail: editingUser.email,
       userName: editingUser.name,
@@ -295,7 +305,6 @@ export default function AdminUsers() {
       return;
     }
 
-    // Enviar e-mail de reativação
     await emailService.sendSuspensionLiftedEmail({
       userEmail: user.email,
       userName: user.name,
@@ -314,9 +323,28 @@ export default function AdminUsers() {
     );
   };
 
+  const getRoleLabel = (role: string) => {
+    const labels: Record<string, string> = {
+      admin: 'Admin',
+      professional: 'Profissional',
+      user: 'Usuário'
+    };
+    return labels[role] || 'Usuário';
+  };
+
+  const getRoleStyle = (role: string) => {
+    const styles: Record<string, string> = {
+      admin: 'bg-primary/10 text-primary',
+      professional: 'bg-violet-100 text-violet-700',
+      user: 'bg-secondary text-secondary-foreground'
+    };
+    return styles[role] || styles.user;
+  };
+
   const filteredUsers = users.filter(user =>
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchTerm.toLowerCase())
+    user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.setor && user.setor.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   if (loading) {
@@ -333,7 +361,7 @@ export default function AdminUsers() {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar por nome ou email..."
+            placeholder="Buscar por nome, email ou departamento..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10"
@@ -348,6 +376,7 @@ export default function AdminUsers() {
               <TableRow>
                 <TableHead>Nome</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Departamento</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Cadastro</TableHead>
@@ -364,12 +393,14 @@ export default function AdminUsers() {
                     <TableCell className="font-medium">{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        user.role === 'admin' 
-                          ? 'bg-primary/10 text-primary' 
-                          : 'bg-secondary text-secondary-foreground'
-                      }`}>
-                        {user.role === 'admin' ? 'Admin' : 'Usuário'}
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        <Building2 className="h-3 w-3" />
+                        {user.setor || '-'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleStyle(user.role)}`}>
+                        {getRoleLabel(user.role)}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -461,21 +492,40 @@ export default function AdminUsers() {
               <Input value={formData.email} disabled className="bg-muted" />
             </div>
             <div className="space-y-2">
+              <Label>Departamento</Label>
+              <Select value={formData.setor} onValueChange={(v) => setFormData({ ...formData, setor: v })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o departamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENTS.map(dept => (
+                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>Tipo</Label>
-              <Select value={formData.role} onValueChange={(v: 'user' | 'admin') => setFormData({ ...formData, role: v })}>
+              <Select value={formData.role} onValueChange={(v: 'user' | 'admin' | 'professional') => setFormData({ ...formData, role: v })}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="user">Usuário</SelectItem>
+                  <SelectItem value="professional">Profissional</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Alterar o tipo atualizará as permissões imediatamente.
+              </p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDialog(false)}>Cancelar</Button>
-            <Button onClick={handleSave} className="gradient-primary">Salvar</Button>
+            <Button onClick={handleSave} className="gradient-primary" disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
