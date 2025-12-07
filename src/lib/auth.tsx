@@ -25,10 +25,12 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string, setor: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
+  isProfessional: boolean;
   isSuspended: boolean;
   isBlocked: boolean;
   suspendedUntil: Date | null;
   refreshProfile: () => Promise<void>;
+  userRole: 'admin' | 'professional' | 'user' | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<'admin' | 'professional' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
@@ -58,14 +60,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         blocked: profileData?.blocked || false,
       });
 
-      // Check if user is admin
+      // Check user role
       const { data: roleData } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
         .maybeSingle();
 
-      setIsAdmin(roleData?.role === 'admin');
+      setUserRole(roleData?.role as 'admin' | 'professional' | 'user' || 'user');
     } catch (error) {
       console.error('Error in fetchProfile:', error);
     }
@@ -85,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }, 0);
         } else {
           setProfile(null);
-          setIsAdmin(false);
+          setUserRole(null);
         }
       }
     );
@@ -173,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setUser(null);
     setSession(null);
-    setIsAdmin(false);
+    setUserRole(null);
   };
 
   const refreshProfile = async () => {
@@ -185,6 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const suspendedUntil = profile?.suspended_until ? new Date(profile.suspended_until) : null;
   const isSuspended = suspendedUntil ? suspendedUntil > new Date() : false;
   const isBlocked = profile?.blocked || false;
+  const isAdmin = userRole === 'admin';
+  const isProfessional = userRole === 'professional';
 
   return (
     <AuthContext.Provider value={{
@@ -196,10 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       signOut,
       isAdmin,
+      isProfessional,
       isSuspended,
       isBlocked,
       suspendedUntil,
-      refreshProfile
+      refreshProfile,
+      userRole
     }}>
       {children}
     </AuthContext.Provider>

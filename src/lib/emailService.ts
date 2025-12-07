@@ -11,7 +11,7 @@ interface AppointmentEmailData {
   userEmail: string;
   userName: string;
   specialty: string;
-  professionalName: string;
+  professionalName?: string;
   appointmentDate: string;
   appointmentTime: string;
 }
@@ -51,7 +51,7 @@ export const emailService = {
   },
 
   // E-mail de cancelamento
-  async sendCancellationEmail(data: AppointmentEmailData & { cancelledByAdmin?: boolean; sameDayCancellation?: boolean }): Promise<{ success: boolean; error?: string }> {
+  async sendCancellationEmail(data: AppointmentEmailData & { cancelledByAdmin?: boolean; sameDayCancellation?: boolean; reason?: string; cancelledBy?: 'admin' | 'professional' | 'user' }): Promise<{ success: boolean; error?: string }> {
     try {
       const { error } = await supabase.functions.invoke('send-cancellation-email', {
         body: data,

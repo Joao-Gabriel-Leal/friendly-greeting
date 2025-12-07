@@ -34,10 +34,11 @@ export default function TimeSelector({ professionalId, professionalName, special
 
   const fetchBookedSlots = async () => {
     try {
+      // Get slots booked for this specialty on this date (by any professional)
       const { data } = await supabase
         .from('appointments')
         .select('appointment_time')
-        .eq('professional_id', professionalId)
+        .eq('specialty_id', specialtyId)
         .eq('appointment_date', format(date, 'yyyy-MM-dd'))
         .in('status', ['scheduled', 'completed']);
 
